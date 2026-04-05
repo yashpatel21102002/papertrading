@@ -1,0 +1,45 @@
+# Stage 1: Install dependencies
+FROM node:25-alpine AS deps
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# CHANGED: Using 'npm install' instead of 'npm ci' to avoid the EUSAGE error
+RUN npm install
+
+# Stage 2: Build the application
+FROM node:25-alpine AS builder
+WORKDIR /app
+# Copy node_modules from the deps stage
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Disable Next.js telemetry during build
+ENV NEXT_TELEMETRY_DISABLED 1
+
+RUN npm run build
+
+# Stage 3: Production Runner
+FROM node:25-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
+
+# Security: Run as a non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy essential files only
+COPY --from=builder /app/public ./public
+# Note: This requires "output: 'standalone'" in your next.config.js
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+# Start the standalone Next.js server
+CMD ["node", "server.js"]
