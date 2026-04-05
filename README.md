@@ -28,6 +28,9 @@ The application is split into highly cohesive, loosely coupled microservices to 
 3.  **Redis Pub/Sub:** Acts as the central nervous system, distributing events (e.g., `stock:RELIANCE.NS`) from the Engine to the WebSocket server.
 4.  **WebSocket Server:** Subscribes to Redis channels and pushes real-time price updates and order execution notifications directly to the connected clients.
 
+<img width="955" height="715" alt="image" src="https://github.com/user-attachments/assets/8ba931b4-a733-40f3-9794-6c28173aac82" />
+
+
 ## 🐳 Getting Started (Local Development)
 
 The entire infrastructure is containerized. You can spin up the frontend, backend microservices, database, and cache using a single command.
@@ -44,7 +47,7 @@ The entire infrastructure is containerized. You can spin up the frontend, backen
     cd nextrade
     ```
 
-2.  **Environment Variables:**
+2.  **Environment Variables:** (Only for manual setup)
     Create a `.env` file in the root directory (or use the provided `.env.example`) and configure your database and port settings.
 
 3.  **Start the cluster:**
@@ -53,7 +56,7 @@ The entire infrastructure is containerized. You can spin up the frontend, backen
     docker-compose up --build -d
     ```
 
-4.  **Database Migration (If applicable):**
+4.  **Database Migration (Only for manual setup):**
     Ensure your Prisma schema is synced with the Postgres container:
     ```bash
     docker-compose exec api npx prisma migrate deploy
