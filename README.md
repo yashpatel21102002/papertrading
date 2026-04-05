@@ -2,6 +2,13 @@
 
 NexTrade is a high-performance, real-time paper trading application that simulates the Indian stock market (Nifty 50). Built with a microservices architecture, it features a custom in-memory order matching engine, live price streaming via WebSockets, and comprehensive portfolio analytics.
 
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/b2a7a5b2-04e9-43b1-869a-cbd2330f70a3" />
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/2c6d0c1e-215b-40a6-8841-33d432cc6e31" />
+<img width="1900" height="971" alt="image" src="https://github.com/user-attachments/assets/80e74b96-bf85-4bad-a5c1-1471ab527bc5" />
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/cc2dd303-87d2-4e4f-90c5-2a761005b692" />
+
+
+
 ## 🚀 Features
 
 * **Real-Time Market Data:** Live price updates for Nifty 50 stocks using WebSocket streaming.
