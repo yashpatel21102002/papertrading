@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # 1. Postgres Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. Redis (For Pub/Sub & Caching)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # 3. Main API Server (Node.js)
+  api:
+    build: 
+      context: ./backend/api
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - PORT=8001
+      # FIX: Use 'postgres' hostname instead of 'localhost'
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+      # FIX: Use 'engine' hostname instead of 'localhost'
+      - ENGINE_URL=http://engine:8002
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8001:8001"
+    command: > 
+      sh -c "npx prisma migrate deploy && npm start"
+    depends_on:
+      - postgres
+      - redis
+
+  # 4. Engine (Node.js)
+  engine:
+    build: 
+      context: ./backend/engine
+    environment:
+      - REDIS_HOST=redis
+      - PORT=8002
+      - POLLING_SYMBOLS=ADANIENT.NS,ADANIPORTS.NS,APOLLOHOSP.NS,ASIANPAINT.NS,AXISBANK.NS,BAJAJ-AUTO.NS,BAJFINANCE.NS,BAJAJFINSV.NS,BEL.NS,BHARTIARTL.NS,BPCL.NS,BRITANNIA.NS,CIPLA.NS,COALINDIA.NS,DIVISLAB.NS,DRREDDY.NS,EICHERMOT.NS,GRASIM.NS,HCLTECH.NS,HDFCBANK.NS,HDFCLIFE.NS,HEROMOTOCO.NS,HINDALCO.NS,HINDUNILVR.NS,ICICIBANK.NS,INDUSINDBK.NS,INFY.NS,ITC.NS,JSWSTEEL.NS,KOTAKBANK.NS,LT.NS,LTIM.NS,MARUTI.NS,M&M.NS,NESTLEIND.NS,NTPC.NS,ONGC.NS,POWERGRID.NS,RELIANCE.NS,SBILIFE.NS,SBIN.NS,SHRIRAMFIN.NS,SUNPHARMA.NS,TATACONSUM.NS,TMCV.NS,TATASTEEL.NS,TCS.NS,TECHM.NS,TITAN.NS,ULTRACEMCO.NS,UPL.NS,WIPRO.NS
+      - SYMBOLS=ADANIENT.NS,ADANIPORTS.NS,APOLLOHOSP.NS,ASIANPAINT.NS,AXISBANK.NS,BAJAJ-AUTO.NS,BAJFINANCE.NS,BAJAJFINSV.NS,BEL.NS,BHARTIARTL.NS,BPCL.NS,BRITANNIA.NS,CIPLA.NS,COALINDIA.NS,DIVISLAB.NS,DRREDDY.NS,EICHERMOT.NS,GRASIM.NS,HCLTECH.NS,HDFCBANK.NS,HDFCLIFE.NS,HEROMOTOCO.NS,HINDALCO.NS,HINDUNILVR.NS,ICICIBANK.NS,INDUSINDBK.NS,INFY.NS,ITC.NS,JSWSTEEL.NS,KOTAKBANK.NS,LT.NS,LTIM.NS,MARUTI.NS,M&M.NS,NESTLEIND.NS,NTPC.NS,ONGC.NS,POWERGRID.NS,RELIANCE.NS,SBILIFE.NS,SBIN.NS,SHRIRAMFIN.NS,SUNPHARMA.NS,TATACONSUM.NS,TMCV.NS,TATASTEEL.NS,TCS.NS,TECHM.NS,TITAN.NS,ULTRACEMCO.NS,UPL.NS,WIPRO.NS
+      - YAHOO_FINANCE_URL=https://query1.finance.yahoo.com/v7/finance/quote?symbols
+      - POLLING_INTERVAL=5000
+      - REDIS_URL=redis://redis:6379
+    ports: 
+      - "8002:8002"
+    depends_on:
+      - redis
+
+  # 5. WebSocket Server (Node.js)
+  ws:
+    build: 
+      context: ./backend/ws
+    environment:
+      - REDIS_HOST=redis
+      - PORT=8003
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8003:8003"
+    depends_on:
+      - redis
+
+  # 6. Next.js Frontend
+  frontend:
+    build: 
+      context: ./frontend
+    environment:
+      # Use the service names defined in your docker-compose file
+      - NEXT_PUBLIC_MARKET_URL=http://localhost:8002
+      - NEXT_PUBLIC_MARKET_WS_URL=ws://localhost:8003
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+      - ws
+      - engine
+
+volumes:
+  pgdata: # Persists your Postgres data even when containers are stopped

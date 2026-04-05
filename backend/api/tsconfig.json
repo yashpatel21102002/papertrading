@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS",
+    "rootDir": "src",            // Only look for TS files here
+    "outDir": "./dist",          // Compiled JS goes here
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true         // Important for Prisma types
+  },
+  "include": ["src/**/*"],       // Tell TS to only compile what's in src
+  "exclude": ["node_modules"]
+}

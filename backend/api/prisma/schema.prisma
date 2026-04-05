@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  balance       Float     @default(0) // Spendable Cash
+  lockedBalance Float     @default(0) // Cash in open BUY orders
+  holdings      Holding[]
+  orders        Order[]
+}
+
+model Holding {
+  id             String @id @default(uuid())
+  userId         String
+  symbol         String
+  quantity       Int // Owned and sellable
+  lockedQuantity Int    @default(0) // Quantity currently in open SELL orders
+  averagePrice   Float
+  user           User   @relation(fields: [userId], references: [id])
+
+  @@unique([userId, symbol])
+}
+
+model Order {
+  id          String   @id @default(uuid())
+  userId      String
+  symbol      String
+  quantity    Int
+  price       Float
+  side        String // "buy" | "sell"
+  status      String // "open" | "filled" | "cancelled"
+  type        String // "market" | "limit"
+  createdAt   DateTime @default(now())
+  lockedValue Float    @default(0) // For BUY: quantity * price, for SELL: quantity * averagePrice
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+}

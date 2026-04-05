@@ -1,0 +1,20 @@
+# Use the official Node.js Alpine image
+FROM node:25-alpine
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the application code
+COPY . .
+
+# Expose the WebSocket port
+EXPOSE 8003
+
+# Command to start the WS server
+CMD ["npm", "start"]

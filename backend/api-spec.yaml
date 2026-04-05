@@ -1,0 +1,198 @@
+openapi: 3.0.0
+info:
+  title: Paper Trading API
+  version: 1.0.0
+  description: API for managing user authentication, stock orders, and portfolio tracking.
+
+servers:
+  - url: http://localhost:8000
+    description: Main API Server
+  - url: ws://localhost:8003
+    description: WebSocket Real-time Server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        balance: { type: number, description: "Available cash balance" }
+        lockedBalance: { type: number, description: "Cash locked in open limit orders" }
+
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        symbol: { type: string }
+        quantity: { type: number }
+        price: { type: number, description: "0 for market orders" }
+        side: { type: string, enum: [buy, sell] }
+        type: { type: string, enum: [limit, market] }
+        status: { type: string, enum: [open, filled, cancelled] }
+        createdAt: { type: string, format: date-time }
+
+    Holding:
+      type: object
+      properties:
+        symbol: { type: string }
+        quantity: { type: number }
+        lockedQuantity: { type: number, description: "Shares locked in open sell orders" }
+        avgPrice: { type: number }
+        currentPrice: { type: number }
+        marketValue: { type: number }
+        pnl: { type: number }
+        pnlPercentage: { type: string }
+
+paths:
+  # --- AUTHENTICATION ---
+  /api/auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        200:
+          description: User created
+        400:
+          description: Email already exists
+
+  /api/auth/login:
+    post:
+      summary: Login and get JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                properties:
+                  token: { type: string }
+
+  # --- ORDERS ---
+  /api/orders/create:
+    post:
+      summary: Place a new buy or sell order
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, quantity, side, type]
+              properties:
+                symbol: { type: string }
+                quantity: { type: number }
+                price: { type: number, description: "Required for limit orders" }
+                side: { type: string, enum: [buy, sell] }
+                type: { type: string, enum: [limit, market] }
+      responses:
+        201:
+          description: Order placed
+        400:
+          description: Insufficient funds or shares
+
+  /api/orders/get:
+    get:
+      summary: Get user order history
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [open, filled, cancelled] }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Order' }
+
+  /api/orders/cancel/{id}:
+    delete:
+      summary: Cancel an open order
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        202:
+          description: Cancellation request submitted
+
+  # --- PORTFOLIO ---
+  /api/portfolio/summary:
+    get:
+      summary: Detailed portfolio PnL and holdings
+      security:
+        - bearerAuth: []
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cash:
+                    properties:
+                      available: { type: number }
+                      locked: { type: number }
+                      total: { type: number }
+                  portfolio:
+                    properties:
+                      totalHoldingsValue: { type: number }
+                      totalPnL: { type: number }
+                      holdings:
+                        type: array
+                        items: { $ref: '#/components/schemas/Holding' }
+                  netWorth: { type: number }
+
+# --- WEBSOCKET PROTOCOL ---
+x-webSocket:
+  description: Real-time price updates
+  connectionUrl: ws://localhost:8003
+  messages:
+    subscribe:
+      payload:
+        type: SUBSCRIBE
+        ticker: string
+    unsubscribe:
+      payload:
+        type: UNSUBSCRIBE
+        ticker: string
+    incomingUpdate:
+      description: Broadcasted from server via Redis Pub/Sub
+      payload:
+        symbol: string
+        regularMarketPrice: number
+        regularMarketChange: number
+        regularMarketChangePercent: number
+        regularMarketTime: string

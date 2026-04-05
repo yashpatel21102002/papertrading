@@ -1,0 +1,18 @@
+FROM node:25-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# We ONLY generate the client here (no DB connection needed)
+RUN npm install
+RUN npx prisma generate
+
+COPY . .
+
+EXPOSE 8001
+
+# The command will be overridden by docker-compose anyway, 
+# but it's good to have a default.
+CMD ["npm", "start"]
