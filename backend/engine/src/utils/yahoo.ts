@@ -10,7 +10,7 @@ dotenv.config();
 //getting the symbols from env file
 const symbols = process.env.SYMBOLS;
 let intervalTime = process.env.POLLING_INTERVAL ? parseInt(process.env.POLLING_INTERVAL) : 2000;
-const sybolsArray = symbols ? symbols.split(',').map(s => s.trim()) : ["RELIANCE.NS", "TCS.NS"];
+const symbolsArray = symbols ? symbols.split(',').map(s => s.trim()) : ["RELIANCE.NS", "TCS.NS"];
 
 //getting the instance of the yahoo finance client
 const yahooFinance = new YahooFinance({
@@ -94,50 +94,55 @@ export async function fetchStockData() {
     isPolling = true;
 
     try {
-        for (const ticker of sybolsArray) {
-            const stockData = await yahooFinance.quoteCombine(ticker, { fields: IMPORTANT_FIELDS });
+        const results = await Promise.all(symbolsArray.map(ticker =>
+            yahooFinance.quoteCombine(ticker, { fields: IMPORTANT_FIELDS })
+        ));
 
+        if (!results || !Array.isArray(results)) {
+            console.warn("No stock data returned from request");
+            return;
+        }
+
+        let allMarketsClosed = true;
+
+        for (const stockData of results) {
             if (!stockData) continue;
 
-            //to be removed
+            const ticker = stockData.symbol;
+
             // 6. Round to NSE Tick Size (0.05)
             stockData.regularMarketPrice = Math.round(randomPriceGenerator(ticker, stockData.regularMarketPrice) / 0.05) * 0.05;
             previousMap.set(ticker, stockData.regularMarketPrice);
 
-
             // 1. Update the central state
-            // updating and storing the latest stock data for each symbol so that we can use it in the marketRouter to send the latest data to the client when requested.
-            // we will store all the data that we get from the api in the stockDataMap and then we will use it in the marketRouter to send the latest data to the client when requested.
-            marketManager.updateSymbol(
-                stockData.symbol,
-                stockData
-            );
+            marketManager.updateSymbol(ticker, stockData);
 
-            if (!marketManager.isMarketOpen(stockData.symbol)) {
-                console.log(`Skipping matching for ${stockData.symbol} - Market is ${stockData.marketState}`);
-                intervalTime = 10000; // Increase interval to 10 seconds when market is closed
-                continue;
+            if (marketManager.isMarketOpen(ticker)) {
+                allMarketsClosed = false;
+                // MatchOrders logic.
+                await matchOrders(ticker, stockData.regularMarketPrice);
             } else {
-                intervalTime = process.env.POLLING_INTERVAL ? parseInt(process.env.POLLING_INTERVAL) : 2000; // Reset to default when market is open
+                console.log(`Skipping matching for ${ticker} - Market is ${stockData.marketState}`);
             }
 
-            //MatchOrders logic.
-            await matchOrders(ticker, stockData.regularMarketPrice);
-
-            //publishing the data to the redis channel
-            await redisClient.publisher.publish(`stock:${stockData.symbol}`, JSON.stringify({
-                symbol: stockData.symbol,
+            // Publishing the data to the redis channel
+            await redisClient.publisher.publish(`stock:${ticker}`, JSON.stringify({
+                symbol: ticker,
                 regularMarketPrice: stockData.regularMarketPrice,
                 regularMarketChange: stockData.regularMarketChange,
                 regularMarketChangePercent: stockData.regularMarketChangePercent,
                 regularMarketTime: stockData.regularMarketTime,
                 shortName: stockData.shortName
-            })).then(() => {
-                // console.log(`Published data for symbol: ${symbol} to Redis channel: stock:${symbol}`);
-            }).catch((err) => {
-                console.error(`Error publishing data for symbol: ${stockData.symbol} to Redis channel: stock:${stockData.symbol}`, err);
+            })).catch((err) => {
+                console.error(`Error publishing data for symbol: ${ticker} to Redis channel: stock:${ticker}`, err);
             });
+        }
 
+        // Adjust interval based on market state
+        if (allMarketsClosed) {
+            intervalTime = 10000;
+        } else {
+            intervalTime = process.env.POLLING_INTERVAL ? parseInt(process.env.POLLING_INTERVAL) : 2000;
         }
     } catch (error) {
         console.error("Error fetching stock data:", error);
@@ -160,19 +165,22 @@ function matchOrders(symbol: string, currentPrice: number) {
         // Remove if cancelled elsewhere
         if (!state || state.status !== 'open') return false;
 
-        const isBuyFilled = order.side === 'buy' && currentPrice <= order.price;
-        const isSellFilled = order.side === 'sell' && currentPrice >= order.price;
+        const isMarketOrder = order.type === 'market';
+        const isBuyFilled = order.side === 'buy' && (isMarketOrder || currentPrice <= order.price);
+        const isSellFilled = order.side === 'sell' && (isMarketOrder || currentPrice >= order.price);
 
         if (isBuyFilled || isSellFilled) {
             // Update State
             state.status = 'filled';
             reverseOrders.set(order.orderId, state);
-            console.log(`[✅ FILLED] Order ${order.orderId} for ${symbol} at price ${currentPrice}`);
+            const executionPrice = isMarketOrder ? currentPrice : order.price;
+            console.log(`[✅ FILLED] Order ${order.orderId} for ${symbol} at price ${executionPrice}`);
 
             // Notify via Redis
             RedisClient.getclient().publisher.publish(`order:${order.orderId}`, JSON.stringify({
                 ...order,
-                executionPrice: order.price,
+                executionPrice,
+                price: executionPrice,
                 status: 'filled'
             }));
 

@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { fetchStockData } from './utils/yahoo';
-import { RedisClient } from './utils/redisClient';
+import { RedisManager, RedisClient } from './utils/redisClient';
 import orderRouter from './routes/ordersRouter';
 import marketRouter from './routes/marketRouter'
 
@@ -16,23 +16,26 @@ app.use(express.json());
 app.use("/api/order", orderRouter);
 app.use("/api/market", marketRouter);
 
-app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT}`);
-})
+async function bootstrap() {
+    await RedisManager.getInstance().connect();
 
-//fetching the stock data for the given symbols every 2 seconds (getting interval from env file)
-fetchStockData()
+    app.listen(Number(PORT), '0.0.0.0', () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+
+    //fetching the stock data for the given symbols every 2 seconds (getting interval from env file)
+    fetchStockData();
+}
+
+bootstrap();
 
 //removing the connection when the process is terminated
-process.on('SIGINT', () => {
-    RedisClient.disconnect();
+process.on('SIGINT', async () => {
+    await RedisManager.getInstance().disconnect();
     process.exit();
 });
 
-process.on('SIGTERM', () => {
-    RedisClient.disconnect();
+process.on('SIGTERM', async () => {
+    await RedisManager.getInstance().disconnect();
     process.exit();
 });
-
-
-

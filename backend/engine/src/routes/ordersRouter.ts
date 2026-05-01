@@ -1,9 +1,10 @@
 import express from 'express';
 import { RedisClient } from '../utils/redisClient';
 import { marketManager } from '../utils/MarketManager';
+import { EngineOrder } from '../types';
 
-export const orders: Map<string, { orderId: string, quantity: number, price: number, side: 'buy' | 'sell', type: 'limit' | 'market' }[]> = new Map();
-export const reverseOrders: Map<string, { symbol: string, quantity: number, price: number, side: 'buy' | 'sell', type: 'limit' | 'market', status: 'open' | 'filled' | 'cancelled' }> = new Map();
+export const orders: Map<string, EngineOrder[]> = new Map();
+export const reverseOrders: Map<string, EngineOrder> = new Map();
 
 const router = express.Router();
 
@@ -11,7 +12,12 @@ const router = express.Router();
 router.post('/create', (req, res) => {
     console.log("Received order creation request:", req.body);
     const { orderId, symbol, quantity, price, side, type } = req.body;
-    if (!orderId || !symbol || !quantity || !price || !side || !type) {
+
+    // Market orders might have price 0 or null
+    const isMarketOrder = type === 'market';
+    const isPriceValid = isMarketOrder ? true : (price !== undefined && price !== null);
+
+    if (!orderId || !symbol || !quantity || !side || !type || !isPriceValid) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -24,9 +30,9 @@ router.post('/create', (req, res) => {
     if (!orders.has(symbol)) {
         orders.set(symbol, []);
     }
-    orders.get(symbol)!.push({ orderId, quantity, price, side, type });
+    orders.get(symbol)!.push({ orderId, symbol, quantity, price, side, type });
 
-    reverseOrders.set(orderId, { symbol, quantity, price, side, type, status: 'open' });
+    reverseOrders.set(orderId, { orderId, symbol, quantity, price, side, type, status: 'open' });
     RedisClient.getclient().publisher.publish(`order:${orderId}`, JSON.stringify({
         orderId,
         quantity,
@@ -52,7 +58,7 @@ router.post('/cancel', (req, res) => {
         return res.status(400).json({ error: "Order not found" })
     }
 
-    //we want to cancel the order 
+    //we want to cancel the order
     order.status = 'cancelled';
 
     //setting the cancelled order in the reverseOrders map
@@ -60,7 +66,6 @@ router.post('/cancel', (req, res) => {
 
     //publishing the cancelled order to the redis channel
     RedisClient.getclient().publisher.publish(`order:${orderId}`, JSON.stringify({
-        orderId,
         ...order,
         status: 'cancelled'
     }));

@@ -94,7 +94,7 @@ async function handleRefund(tx: Prisma.TransactionClient, order: any) {
     console.log(`[REFUND] Initiating recovery for ${order.side} order...`);
 
     if (order.side === 'buy') {
-        const amount = order.price * order.quantity;
+        const amount = order.lockedValue;
         const updatedUser = await tx.user.update({
             where: { id: order.userId },
             data: { lockedBalance: { decrement: amount }, balance: { increment: amount } }
