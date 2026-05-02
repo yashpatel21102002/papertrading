@@ -7,6 +7,7 @@ import portfolioRouter from './routes/portfolioRouter';
 import { authenticate } from './middleware/auth';
 import { startEngineSubscriber } from './utils/engineSubscriber';
 import { redisManager } from './utils/redisClient';
+import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
 
@@ -22,6 +23,8 @@ app.use('/api/auth', authRouter);
 // Protected Routes
 app.use('/api/orders', authenticate, orderRouter);
 app.use('/api/portfolio', authenticate, portfolioRouter);
+
+app.use(errorHandler);
 
 async function bootstrap() {
     // 1. Connect Redis first

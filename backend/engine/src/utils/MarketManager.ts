@@ -26,9 +26,12 @@ class MarketManager {
 
     // Called by the Router (OrderRouter.ts)
     public isMarketOpen(symbol: string): boolean {
-        return true; // For testing purposes, we assume all markets are open. Replace with actual logic as needed.
         const data = this.marketData.get(symbol);
-        return data?.status === 'REGULAR';
+        // If status is UNKNOWN (e.g. initial fetch not yet done), assume open for demo
+        if (!data) return true;
+
+        // Yahoo Finance marketState values can be 'REGULAR', 'CLOSED', 'PRE', 'POST', etc.
+        return data.status === 'REGULAR' || data.status === 'PREMARKET' || data.status === 'POSTMARKET';
     }
 
     public getPrice(symbol: string): number | null {

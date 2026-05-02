@@ -2,16 +2,21 @@ import { Router, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import axios from 'axios';
+import { validateOrderInput } from '../utils/validators';
 
 const router = Router();
 const ENGINE_URL = process.env.ENGINE_URL || 'http://localhost:5000';
 
 // POST /api/orders/create
-router.post('/create', async (req: AuthRequest, res: Response) => {
-    const { symbol, quantity, price, side, type } = req.body;
-    const userId = req.user?.id!;
-
+router.post('/create', async (req: AuthRequest, res: Response, next: any) => {
     try {
+        const { symbol, quantity, price, side, type } = req.body;
+        const userId = req.user?.id!;
+
+        if (!validateOrderInput(quantity, price, type)) {
+            return res.status(400).json({ error: "Invalid order input. Ensure quantity and price are positive." });
+        }
+
         let lockPrice = price;
 
         // 1. Calculate the exact value to lock
@@ -85,7 +90,7 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
                 type
             });
         } catch (engineErr) {
-            // Note: In a production app, you would trigger an automatic rollback/cleanup 
+            // Note: In a production app, you would trigger an automatic rollback/cleanup
             // if the engine is unreachable.
             console.error("[ENGINE_ERROR] Failed to reach engine:", engineErr);
         }
@@ -93,23 +98,23 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
         res.status(201).json({ message: "Order placed successfully", orderId: order.id });
 
     } catch (err: any) {
-        res.status(400).json({ error: err.message || "Order creation failed" });
+        next(err);
     }
 });
 
 // DELETE /api/orders/cancel/:id
-router.delete('/cancel/:id', async (req: AuthRequest, res: Response) => {
-    const userId = req.user?.id!;
-    const orderId = String(req.params.id); // Fixed: removed the [0] index bug
-
+router.delete('/cancel/:id', async (req: AuthRequest, res: Response, next: any) => {
     try {
+        const userId = req.user?.id!;
+        const orderId = String(req.params.id); // Fixed: removed the [0] index bug
+
         const order = await prisma.order.findUnique({ where: { id: orderId } });
 
         if (!order || order.userId !== userId || order.status !== 'open') {
             return res.status(404).json({ error: "Order not found or cannot be cancelled" });
         }
 
-        // We do NOT unlock funds here. 
+        // We do NOT unlock funds here.
         // We request the engine to cancel. The engine will emit a 'cancelled' event
         // via Pub/Sub, which your subscriber will use to unlock funds safely.
         await axios.post(`${ENGINE_URL}/api/order/cancel`, {
@@ -120,8 +125,7 @@ router.delete('/cancel/:id', async (req: AuthRequest, res: Response) => {
         res.status(202).json({ message: "Cancellation request sent to engine" });
 
     } catch (err) {
-        console.error("[API:ERROR] Cancel failed:", err);
-        res.status(500).json({ error: "Engine communication failed" });
+        next(err);
     }
 });
 
