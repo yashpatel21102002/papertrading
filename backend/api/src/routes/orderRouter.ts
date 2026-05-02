@@ -21,7 +21,7 @@ router.post('/create', async (req: AuthRequest, res: Response, next: any) => {
 
         // 1. Calculate the exact value to lock
         if (type === 'market') {
-            const ticker: any = await axios.get(`${ENGINE_URL}/api/ticker/${symbol}`);
+            const ticker: any = await axios.get(`${ENGINE_URL}/api/market/${symbol}`);
             // Add 5% buffer to ensure the market order doesn't fail due to minor price jumps
             lockPrice = ticker.data.price * 1.05;
         }
