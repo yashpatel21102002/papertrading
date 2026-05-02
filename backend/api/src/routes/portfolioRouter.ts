@@ -30,10 +30,9 @@ async function fetchAllPrices(): Promise<Record<string, number>> {
  * GET /api/portfolio/summary
  * Returns full portfolio breakdown shaped for the frontend PortfolioPage.
  */
-router.get('/summary', async (req: AuthRequest, res: Response) => {
-    const userId = req.user?.id!;
-
+router.get('/summary', async (req: AuthRequest, res: Response, next) => {
     try {
+        const userId = req.user?.id!;
         const user = await prisma.user.findUnique({
             where: { id: userId },
             include: { holdings: true }
@@ -95,8 +94,7 @@ router.get('/summary', async (req: AuthRequest, res: Response) => {
             equityHistory,
         });
     } catch (error) {
-        console.error('[Portfolio] Summary failed:', error);
-        return res.status(500).json({ error: 'Portfolio sync failed' });
+        next(error);
     }
 });
 
@@ -104,10 +102,9 @@ router.get('/summary', async (req: AuthRequest, res: Response) => {
  * GET /api/portfolio/portfolio
  * Raw balance + holdings — used by order placement screens etc.
  */
-router.get('/portfolio', async (req: AuthRequest, res: Response) => {
-    const userId = req.user?.id!;
-
+router.get('/portfolio', async (req: AuthRequest, res: Response, next) => {
     try {
+        const userId = req.user?.id!;
         const [user, holdings] = await prisma.$transaction([
             prisma.user.findUnique({ where: { id: userId } }),
             prisma.holding.findMany({ where: { userId } }),
@@ -121,8 +118,7 @@ router.get('/portfolio', async (req: AuthRequest, res: Response) => {
             holdings,
         });
     } catch (error) {
-        console.error('[Portfolio] Fetch failed:', error);
-        return res.status(500).json({ error: 'Internal server error' });
+        next(error);
     }
 });
 

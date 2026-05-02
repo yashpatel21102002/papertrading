@@ -3,6 +3,7 @@ import { RedisClient } from "./redisClient";
 import dotenv from 'dotenv';
 import { orders, reverseOrders } from "../routes/ordersRouter";
 import { marketManager } from "./MarketManager";
+import { randomPriceGenerator } from "./simulator";
 
 //loading the environment variables from the .env file
 dotenv.config();
@@ -51,37 +52,6 @@ const IMPORTANT_FIELDS = [
 //flag to check if the polling is already running or not
 let isPolling = false;
 
-//to be removed
-//storing the previous price so that we can generate other price on that.
-const previousMap = new Map<string, { price: number }>();
-
-function randomPriceGenerator(ticker: string, price: number) {
-    // 1. Define how "Crazy" the market is (0.01 = 1% potential move per tick)
-    const VOLATILITY_COEFFICIENT = 0.005; // 0.5% base swing - quite high for Nifty!
-
-    // 2. Create a "Noise" factor that isn't just linear
-    // Using Math.pow makes small moves common but big moves much more impactful
-    let rawRandom = Math.random() - 0.5; // -0.5 to 0.5
-    let sign = Math.sign(rawRandom);
-    let skewedRandom = sign * Math.pow(Math.abs(rawRandom), 0.8); // 0.8 makes big moves easier
-
-    // 3. Get Previous Price
-    const previousPrice = previousMap.get(ticker)?.price || price;
-
-    // 4. Calculate the "High Volatility" Change
-    // We removed the "/ 100" and replaced it with our Coefficient
-    const change = skewedRandom * VOLATILITY_COEFFICIENT;
-    const newPrice = previousPrice * (1 + change);
-
-    // 5. Apply "Gap" Logic (Optional: 1% chance of a 2% jump)
-    let finalPrice = newPrice;
-    if (Math.random() < 0.01) {
-        const gapDirection = Math.random() > 0.5 ? 1.02 : 0.98;
-        finalPrice *= gapDirection;
-    }
-
-    return finalPrice
-}
 
 //function to fetch the stock data for the given symbols every 2 seconds
 export async function fetchStockData() {
@@ -111,8 +81,7 @@ export async function fetchStockData() {
             const ticker = stockData.symbol;
 
             // 6. Round to NSE Tick Size (0.05)
-            stockData.regularMarketPrice = Math.round(randomPriceGenerator(ticker, stockData.regularMarketPrice) / 0.05) * 0.05;
-            previousMap.set(ticker, stockData.regularMarketPrice);
+            stockData.regularMarketPrice = randomPriceGenerator(ticker, stockData.regularMarketPrice);
 
             // 1. Update the central state
             marketManager.updateSymbol(ticker, stockData);
