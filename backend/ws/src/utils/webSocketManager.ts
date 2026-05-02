@@ -5,7 +5,9 @@ import { RedisClient } from "./redisClient";
 export class WebSocketManager {
     private static instance: WebSocketManager;
     wss: WebSocketServer;
-    subscriptions: { [key: string]: { ws: WebSocket, tickers: string[] } } = {};
+    private tickerToClientIds: Map<string, Set<string>> = new Map();
+    private clientIdToWs: Map<string, WebSocket> = new Map();
+    private clientIdToTickers: Map<string, Set<string>> = new Map();
 
     //creating a private constructor to prevent instantiation of the class from outside
     private constructor(port: number) {
@@ -14,11 +16,12 @@ export class WebSocketManager {
         this.wss.on('connection', (ws: WebSocket) => {
             console.log('Client connected');
             const id = crypto.randomUUID();
-            this.subscriptions[id] = { ws, tickers: [] }; // Store the WebSocket client and its subscribed tickers
+            this.clientIdToWs.set(id, ws);
+            this.clientIdToTickers.set(id, new Set());
 
             ws.on('close', () => {
                 console.log('Client disconnected');
-
+                this.handleDisconnect(id);
             });
 
             ws.on('message', (message) => {
@@ -38,45 +41,66 @@ export class WebSocketManager {
     }
 
     private handleMessage(message: string, id: string) {
-        const parsedMessage = JSON.parse(message);
+        try {
+            const parsedMessage = JSON.parse(message);
+            const { type, ticker } = parsedMessage;
 
-        // hanlde the subscribe message from the client and add the client to the corresponding ticker
-        if (parsedMessage.type === 'SUBSCRIBE') {
-
-            this.subscriptions[id].tickers.push(parsedMessage.ticker);
-            //if there is one of the subscriber is there then we will subscribe to pubsub channel for that ticker
-            if (this.oneUserSubscribedToTicker(parsedMessage.ticker)) {
-                RedisClient.getclient().subscriber.subscribe(parsedMessage.ticker, (message) => {
-                    // console.log(`Received message for ticker ${parsedMessage.ticker}: ${message}`);
-                    //broadcast the message to all the clients subscribed to that ticker
-                    Object.keys(this.subscriptions).map((key) => {
-                        if (this.subscriptions[key].tickers.includes(parsedMessage.ticker)) {
-                            this.subscriptions[key].ws.send(message);
-                        }
+            if (type === 'SUBSCRIBE' && ticker) {
+                this.clientIdToTickers.get(id)?.add(ticker);
+                if (!this.tickerToClientIds.has(ticker)) {
+                    this.tickerToClientIds.set(ticker, new Set());
+                    // First subscriber for this ticker, subscribe to Redis
+                    RedisClient.getclient().subscriber.subscribe(ticker, (msg) => {
+                        this.broadcast(ticker, msg);
                     });
-                });
+                }
+                this.tickerToClientIds.get(ticker)?.add(id);
             }
 
-        }
-
-        // handle the unsubscribe message from the client and remove the client from the corresponding ticker
-        if (parsedMessage.type === 'UNSUBSCRIBE') {
-            this.subscriptions[id].tickers = this.subscriptions[id].tickers.filter((key) => key !== parsedMessage.ticker);
-
-            if (!this.oneUserSubscribedToTicker(parsedMessage.ticker)) {
-                RedisClient.getclient().subscriber.unsubscribe(parsedMessage.ticker);
+            if (type === 'UNSUBSCRIBE' && ticker) {
+                this.clientIdToTickers.get(id)?.delete(ticker);
+                const clients = this.tickerToClientIds.get(ticker);
+                if (clients) {
+                    clients.delete(id);
+                    if (clients.size === 0) {
+                        this.tickerToClientIds.delete(ticker);
+                        RedisClient.getclient().subscriber.unsubscribe(ticker);
+                    }
+                }
             }
+        } catch (err) {
+            console.error("Failed to handle WebSocket message:", err);
         }
     }
 
-    private oneUserSubscribedToTicker(ticker: string): boolean {
-        let subscribed = false;
-        Object.keys(this.subscriptions).map((key) => {
-            if (this.subscriptions[key].tickers.includes(ticker)) {
-                subscribed = true;
-            }
-        });
-        return subscribed;
+    private handleDisconnect(id: string) {
+        const tickers = this.clientIdToTickers.get(id);
+        if (tickers) {
+            tickers.forEach(ticker => {
+                const clients = this.tickerToClientIds.get(ticker);
+                if (clients) {
+                    clients.delete(id);
+                    if (clients.size === 0) {
+                        this.tickerToClientIds.delete(ticker);
+                        RedisClient.getclient().subscriber.unsubscribe(ticker);
+                    }
+                }
+            });
+        }
+        this.clientIdToTickers.delete(id);
+        this.clientIdToWs.delete(id);
+    }
+
+    private broadcast(ticker: string, message: string) {
+        const clientIds = this.tickerToClientIds.get(ticker);
+        if (clientIds) {
+            clientIds.forEach(id => {
+                const ws = this.clientIdToWs.get(id);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(message);
+                }
+            });
+        }
     }
 
 
