@@ -8,8 +8,10 @@ import { authenticate } from './middleware/auth';
 import { startEngineSubscriber } from './utils/engineSubscriber';
 import { redisManager } from './utils/redisClient';
 import { errorHandler } from './middleware/errorHandler';
+import { validateEnv } from './utils/envValidator';
 
 dotenv.config();
+validateEnv();
 
 const app = express();
 const PORT = process.env.PORT || 4000;

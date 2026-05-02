@@ -64,12 +64,32 @@ async function handleFill(tx: Prisma.TransactionClient, order: any, event: any) 
             }
         });
 
-        // 2. Add the shares
-        await tx.holding.upsert({
-            where: { userId_symbol: { userId: order.userId, symbol: order.symbol } },
-            update: { quantity: { increment: event.quantity } },
-            create: { userId: order.userId, symbol: order.symbol, quantity: event.quantity, averagePrice: event.price }
+        // 2. Add the shares and update average price
+        const existingHolding = await tx.holding.findUnique({
+            where: { userId_symbol: { userId: order.userId, symbol: order.symbol } }
         });
+
+        if (existingHolding) {
+            const newQuantity = existingHolding.quantity + event.quantity;
+            const newAveragePrice = ((existingHolding.averagePrice * existingHolding.quantity) + (event.price * event.quantity)) / newQuantity;
+
+            await tx.holding.update({
+                where: { id: existingHolding.id },
+                data: {
+                    quantity: newQuantity,
+                    averagePrice: newAveragePrice
+                }
+            });
+        } else {
+            await tx.holding.create({
+                data: {
+                    userId: order.userId,
+                    symbol: order.symbol,
+                    quantity: event.quantity,
+                    averagePrice: event.price
+                }
+            });
+        }
 
     } else {
         // SELL SIDE
