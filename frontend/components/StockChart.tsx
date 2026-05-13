@@ -1,26 +1,32 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { AdvancedRealTimeChart } from "react-ts-tradingview-widgets";
 
 export default function Chart() {
   const searchParams = useSearchParams();
-  // const symbolParam = searchParams.get("symbol")?.slice(0, -3).toUpperCase();
+  const [symbol, setSymbol] = useState("BSE:RELIANCE");
 
-  const symbolParam = searchParams.get("symbol");
+  useEffect(() => {
+    const symbolParam = searchParams.get("symbol") || localStorage.getItem("lastViewedTicker") || "RELIANCE.NS";
+    const formattedSymbol = `BSE:${symbolParam.replace(".NS", "").toUpperCase()}`;
+    setSymbol(formattedSymbol);
+  }, [searchParams]);
 
-  const formattedSymbol = symbolParam
-    ? `BSE:${symbolParam.replace(".NS", "").toUpperCase()}`
-    : "B  SE:RELIANCE";
   return (
-    <div className="h-[500px]">
+    <div className="h-full w-full">
       <AdvancedRealTimeChart
-        symbol={formattedSymbol}
-        theme="light"
-        // allow_symbol_change={false}
+        symbol={symbol}
+        theme="dark"
         interval="D"
         autosize
+        hide_side_toolbar={false}
+        allow_symbol_change={true}
+        save_image={false}
+        details={true}
+        hotlist={true}
+        calendar={true}
       />
     </div>
   );

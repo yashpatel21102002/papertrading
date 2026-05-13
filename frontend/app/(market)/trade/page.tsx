@@ -67,7 +67,22 @@ export default function TradePage() {
 
 function TradeContent() {
   const searchParams = useSearchParams();
-  const symbolParam = searchParams.get("symbol") || "RELIANCE.NS";
+  const [symbolParam, setSymbolParam] = useState<string>("RELIANCE.NS");
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const querySymbol = searchParams.get("symbol");
+    if (querySymbol) {
+      setSymbolParam(querySymbol);
+      localStorage.setItem("lastViewedTicker", querySymbol);
+    } else {
+      const lastViewed = localStorage.getItem("lastViewedTicker");
+      if (lastViewed) {
+        setSymbolParam(lastViewed);
+      }
+    }
+    setIsReady(true);
+  }, [searchParams]);
 
   // 2. Initialize WebSocket for this specific symbol
   const tickers = useMemo(() => [symbolParam], [symbolParam]);
@@ -91,6 +106,7 @@ function TradeContent() {
 
   // 1. Initial Fetch from the Market Polling source
   useEffect(() => {
+    if (!isReady) return;
     const fetchLatestMarketData = async () => {
       try {
         const response = await axios.get(
@@ -109,7 +125,7 @@ function TradeContent() {
       }
     };
     fetchLatestMarketData();
-  }, [symbolParam]);
+  }, [symbolParam, isReady]);
 
   // 3. Merge WebSocket data with static data
   // We use the Live data if available, otherwise fallback to static
@@ -207,7 +223,7 @@ function TradeContent() {
     }
   };
 
-  if (!marketInfo) {
+  if (!marketInfo || !isReady) {
     return <TradeLoadingScreen />;
   }
 
