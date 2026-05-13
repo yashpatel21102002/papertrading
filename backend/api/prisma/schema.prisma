@@ -7,13 +7,14 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
+  id            String        @id @default(uuid())
+  email         String        @unique
   password      String
-  balance       Float     @default(0) // Spendable Cash
-  lockedBalance Float     @default(0) // Cash in open BUY orders
+  balance       Float         @default(0) // Spendable Cash
+  lockedBalance Float         @default(0) // Cash in open BUY orders
   holdings      Holding[]
   orders        Order[]
+  transactions  Transaction[]
 }
 
 model Holding {
@@ -41,4 +42,21 @@ model Order {
   lockedValue Float    @default(0) // For BUY: quantity * price, for SELL: quantity * averagePrice
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([userId, symbol])
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  userId    String
+  orderId   String?
+  type      String // "fill" | "refund"
+  amount    Float
+  asset     String // "INR" or stock symbol
+  quantity  Int?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

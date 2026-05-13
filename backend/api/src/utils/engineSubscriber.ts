@@ -64,11 +64,43 @@ async function handleFill(tx: Prisma.TransactionClient, order: any, event: any) 
             }
         });
 
-        // 2. Add the shares
-        await tx.holding.upsert({
-            where: { userId_symbol: { userId: order.userId, symbol: order.symbol } },
-            update: { quantity: { increment: event.quantity } },
-            create: { userId: order.userId, symbol: order.symbol, quantity: event.quantity, averagePrice: event.price }
+        // 2. Add/Update the shares with weighted average price calculation
+        const existingHolding = await tx.holding.findUnique({
+            where: { userId_symbol: { userId: order.userId, symbol: order.symbol } }
+        });
+
+        if (existingHolding) {
+            const newQuantity = existingHolding.quantity + event.quantity;
+            const newAveragePrice = ((existingHolding.quantity * existingHolding.averagePrice) + (event.quantity * event.price)) / newQuantity;
+
+            await tx.holding.update({
+                where: { id: existingHolding.id },
+                data: {
+                    quantity: newQuantity,
+                    averagePrice: newAveragePrice
+                }
+            });
+        } else {
+            await tx.holding.create({
+                data: {
+                    userId: order.userId,
+                    symbol: order.symbol,
+                    quantity: event.quantity,
+                    averagePrice: event.price
+                }
+            });
+        }
+
+        // 3. Log transaction
+        await tx.transaction.create({
+            data: {
+                userId: order.userId,
+                orderId: order.id,
+                type: 'fill',
+                amount: actualCost,
+                asset: 'INR',
+                quantity: event.quantity
+            }
         });
 
     } else {
@@ -82,6 +114,18 @@ async function handleFill(tx: Prisma.TransactionClient, order: any, event: any) 
             where: { id: order.userId },
             data: { balance: { increment: actualCost } }
         });
+
+        // Log transaction
+        await tx.transaction.create({
+            data: {
+                userId: order.userId,
+                orderId: order.id,
+                type: 'fill',
+                amount: actualCost,
+                asset: 'INR',
+                quantity: event.quantity
+            }
+        });
     }
 
     await tx.order.update({
@@ -94,18 +138,39 @@ async function handleRefund(tx: Prisma.TransactionClient, order: any) {
     console.log(`[REFUND] Initiating recovery for ${order.side} order...`);
 
     if (order.side === 'buy') {
-        const amount = order.price * order.quantity;
+        const amount = order.lockedValue; // Use lockedValue for accurate refund
         const updatedUser = await tx.user.update({
             where: { id: order.userId },
             data: { lockedBalance: { decrement: amount }, balance: { increment: amount } }
         });
         console.log(`[DB:USER] Refunded ${amount} to User ${order.userId}. New Balance: ${updatedUser.balance}`);
+
+        await tx.transaction.create({
+            data: {
+                userId: order.userId,
+                orderId: order.id,
+                type: 'refund',
+                amount: amount,
+                asset: 'INR'
+            }
+        });
     } else {
         const updatedHolding = await tx.holding.update({
             where: { userId_symbol: { userId: order.userId, symbol: order.symbol } },
             data: { lockedQuantity: { decrement: order.quantity }, quantity: { increment: order.quantity } }
         });
         console.log(`[DB:HOLDING] Returned ${order.quantity} shares to User ${order.userId}. New Quantity: ${updatedHolding.quantity}`);
+
+        await tx.transaction.create({
+            data: {
+                userId: order.userId,
+                orderId: order.id,
+                type: 'refund',
+                amount: 0,
+                asset: order.symbol,
+                quantity: order.quantity
+            }
+        });
     }
 
     const finalOrder = await tx.order.update({

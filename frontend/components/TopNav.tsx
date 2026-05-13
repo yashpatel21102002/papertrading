@@ -2,7 +2,7 @@
 import { BarChart3, Brain, Briefcase, Menu, TrendingUp, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useGetPortfolio from "@/hooks/use-getPortfolio";
 
 const navItems = [
@@ -15,8 +15,21 @@ const navItems = [
 export function TopNav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { portfolio } = useGetPortfolio();
+  const [lastTicker, setLastTicker] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLastTicker(localStorage.getItem("lastViewedTicker"));
+  }, []);
 
   const pathname = usePathname();
+
+  const getPath = (path: string) => {
+    if (path === "/trade" && lastTicker) {
+      return `/trade?symbol=${lastTicker}`;
+    }
+    return path;
+  };
+
   return (
     <nav className="border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
@@ -30,14 +43,13 @@ export function TopNav() {
         </Link>
 
         {/* Desktop Navigation  */}
-        {/* Desktop nav */}
         <div className="hidden md:flex items-center gap-1">
           {navItems.map((item) => {
             const active = pathname === item.path;
             return (
               <Link
                 key={item.path}
-                href={item.path}
+                href={getPath(item.path)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
                   active
                     ? "bg-primary/10 text-primary"
@@ -79,7 +91,7 @@ export function TopNav() {
             return (
               <Link
                 key={item.path}
-                href={item.path}
+                href={getPath(item.path)}
                 onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-2 px-3 py-2.5 rounded-md text-sm transition-colors ${
                   active
