@@ -31,14 +31,32 @@ export interface OrderEvent {
     executionPrice?: number;
 }
 
+const PUBLISH_MAX_RETRIES = 3;
+const PUBLISH_RETRY_DELAY_MS = 500;
+
 export async function publishOrderEvent(event: OrderEvent): Promise<void> {
     if (!producer) {
         log.error({ orderId: event.orderId }, 'Cannot publish: Kafka producer not connected');
         return;
     }
-    await producer.send({
-        topic: TOPICS.ORDER_EVENTS,
-        messages: [{ key: event.orderId, value: JSON.stringify(event) }],
-    });
-    log.debug({ orderId: event.orderId, status: event.status }, 'Order event published');
+
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= PUBLISH_MAX_RETRIES; attempt++) {
+        try {
+            await producer.send({
+                topic: TOPICS.ORDER_EVENTS,
+                // Key by symbol — ensures per-symbol ordering across fill / cancel events.
+                messages: [{ key: event.symbol, value: JSON.stringify(event) }],
+            });
+            log.debug({ orderId: event.orderId, status: event.status }, 'Order event published');
+            return;
+        } catch (err) {
+            lastErr = err;
+            log.warn({ err, orderId: event.orderId, attempt }, 'Kafka publish failed, retrying');
+            await new Promise(r => setTimeout(r, PUBLISH_RETRY_DELAY_MS * attempt));
+        }
+    }
+
+    // All retries exhausted — the event is lost. Log at fatal so this is immediately visible.
+    log.fatal({ err: lastErr, event }, 'Kafka publish failed after all retries — order event lost, manual intervention required');
 }

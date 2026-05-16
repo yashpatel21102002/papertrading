@@ -10,6 +10,9 @@ export interface StockSnapshot {
     regularMarketDayHigh: number | null;
     regularMarketDayLow: number | null;
     regularMarketVolume: number | null;
+    fiftyTwoWeekHigh: number | null;
+    fiftyTwoWeekLow: number | null;
+    marketCap: number | null;
     marketState: MarketStateCode;
     exchange: string | null;
     fullExchangeName: string | null;

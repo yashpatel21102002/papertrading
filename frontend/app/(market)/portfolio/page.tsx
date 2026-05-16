@@ -1,294 +1,509 @@
 "use client";
-import { useEffect, useState } from "react";
-import axios from "axios";
 import {
-  TrendingUp,
-  TrendingDown,
-  Wallet,
-  DollarSign,
-  BarChart3,
-  Loader2,
+    TrendingUp, TrendingDown, Wallet, BarChart3, ArrowUpRight, ArrowDownRight, DollarSign,
+    RotateCcw, AlertTriangle, Loader2, X,
 } from "lucide-react";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
+    PieChart, Pie, Cell, ResponsiveContainer,
+    AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
+import useGetPortfolio from "@/hooks/use-getPortfolio";
+import useGetTrades from "@/hooks/use-getTrades";
+import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/axios";
+import { toast } from "sonner";
 
-const COLORS = [
-  "#10b981",
-  "#3b82f6",
-  "#8b5cf6",
-  "#f59e0b",
-  "#ef4444",
-  "#06b6d4",
+const CHART_COLORS = [
+    "#00d97e", "#3b82f6", "#a855f7", "#f59e0b", "#ff4560", "#06b6d4",
 ];
 
-export default function PortfolioPage() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+const INR = (v: number, decimals = 2) =>
+    `₹${v.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 
-  useEffect(() => {
-    api
-      .get("/api/portfolio/summary")
-      .then((res) => {
-        // Log this to your console to see exactly what the backend is sending
-        console.log("Backend Response:", res.data);
-        setData(res.data);
-      })
-      .catch((err) => console.error("Fetch error:", err))
-      .finally(() => setLoading(false));
-  }, []);
+function formatDate(iso: string) {
+    try {
+        return new Date(iso).toLocaleString("en-IN", {
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit", hour12: false,
+        });
+    } catch { return "—"; }
+}
 
-  if (loading)
+function StatCard({
+    label, value, sub, positive, icon: Icon, accentClass,
+}: {
+    label: string; value: string; sub?: string; positive?: boolean;
+    icon: React.ElementType; accentClass: string;
+}) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-
-  // Safety: If data is null or doesn't have the required arrays, show a fallback
-  if (!data || !data.portfolioHoldings)
-    return (
-      <div className="p-10 text-center text-muted-foreground">
-        No portfolio data found. Please check if your backend is returning
-        &quot;portfolioHoldings&quot;.
-      </div>
-    );
-
-  // Destructure with default empty arrays to prevent .map() crashes
-  const {
-    portfolioHoldings = [],
-    equityHistory = [],
-    totalEquity = 0,
-    todayPnl = 0,
-    buyingPower = 0,
-  } = data;
-
-  const pieData = portfolioHoldings.map((h) => ({
-    name: h.symbol,
-    value: parseFloat(h.allocation) || 0,
-  }));
-
-  return (
-    <div className="max-w-7xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-semibold text-foreground mb-6">Portfolio</h1>
-
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
-            <DollarSign className="w-4 h-4" /> Total Equity
-          </div>
-          <p className="text-2xl font-mono font-semibold text-foreground">
-            ₹{totalEquity.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
-            {todayPnl >= 0 ? (
-              <TrendingUp className="w-4 h-4 text-up" />
-            ) : (
-              <TrendingDown className="w-4 h-4 text-down" />
-            )}
-            Total PnL
-          </div>
-          <p
-            className={`text-2xl font-mono font-semibold ${todayPnl >= 0 ? "text-up" : "text-down"}`}
-          >
-            {todayPnl >= 0 ? "+" : ""}₹
-            {todayPnl.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
-            <Wallet className="w-4 h-4" /> Buying Power
-          </div>
-          <p className="text-2xl font-mono font-semibold text-foreground">
-            ₹{buyingPower.toLocaleString("en-IN")}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 mb-6">
-        {/* Asset Allocation */}
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-4">
-            <BarChart3 className="w-4 h-4" /> Asset Allocation
-          </div>
-          {pieData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {pieData.map((_, index) => (
-                      <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                {pieData.map((entry, index) => (
-                  <div
-                    key={entry.name}
-                    className="flex items-center gap-2 text-xs"
-                  >
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    />
-                    <span className="text-muted-foreground">{entry.name}</span>
-                    <span className="font-mono text-foreground ml-auto">
-                      {entry.value}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="h-[200px] flex items-center justify-center text-xs text-muted-foreground">
-              No Assets
+        <div className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground font-medium">{label}</span>
+                <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center", accentClass)}>
+                    <Icon className="w-3.5 h-3.5" />
+                </div>
             </div>
-          )}
+            <div>
+                <p className="text-2xl font-mono font-bold tracking-tight text-foreground">{value}</p>
+                {sub && (
+                    <p className={cn("text-xs mt-1 flex items-center gap-1", positive === true ? "text-up" : positive === false ? "text-down" : "text-muted-foreground")}>
+                        {positive === true && <ArrowUpRight className="w-3 h-3" />}
+                        {positive === false && <ArrowDownRight className="w-3 h-3" />}
+                        {sub}
+                    </p>
+                )}
+            </div>
         </div>
+    );
+}
 
-        {/* Equity Curve */}
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-4">
-            <TrendingUp className="w-4 h-4" /> Equity Growth (30 Days)
-          </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={equityHistory}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="hsl(220, 14%, 14%)"
-              />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: "hsl(215, 14%, 45%)" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "hsl(215, 14%, 45%)" }}
-                axisLine={false}
-                tickLine={false}
-                domain={["auto", "auto"]}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(220, 18%, 7%)",
-                  border: "1px solid hsl(220, 14%, 14%)",
-                  borderRadius: "8px",
-                  fontSize: "12px",
-                }}
-                labelStyle={{ color: "hsl(215, 14%, 45%)" }}
-                formatter={(val) => `₹${val.toLocaleString("en-IN")}`}
-              />
-              <Line
-                type="monotone"
-                dataKey="equity"
-                stroke="hsl(160, 84%, 39%)"
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+function SkeletonCard() {
+    return <div className="bg-card border border-border rounded-xl p-5 h-28 animate-pulse" />;
+}
 
-      {/* Positions Table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-border text-sm font-medium text-muted-foreground">
-          Current Positions
+function CustomTooltip({ active, payload, label }: any) {
+    if (!active || !payload?.length) return null;
+    return (
+        <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
+            <p className="text-muted-foreground mb-0.5">{label}</p>
+            <p className="font-mono font-semibold text-foreground">{INR(payload[0]?.value ?? 0, 0)}</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-muted-foreground border-b border-border">
-                <th className="text-left px-4 py-2 font-medium">Symbol</th>
-                <th className="text-right px-4 py-2 font-medium">Qty</th>
-                <th className="text-right px-4 py-2 font-medium">Avg Price</th>
-                <th className="text-right px-4 py-2 font-medium">LTP</th>
-                <th className="text-right px-4 py-2 font-medium">
-                  Unrealized PnL
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {portfolioHoldings.length > 0 ? (
-                portfolioHoldings.map((h) => {
-                  const pnl = (h.currentPrice - h.avgPrice) * h.qty;
-                  const pnlPercent =
-                    h.avgPrice > 0
-                      ? ((h.currentPrice - h.avgPrice) / h.avgPrice) * 100
-                      : 0;
-                  return (
-                    <tr
-                      key={h.symbol}
-                      className="border-b border-border/50 last:border-0 hover:bg-accent/30"
+    );
+}
+
+export default function PortfolioPage() {
+    const { portfolio: data, isLoading } = useGetPortfolio();
+    const { trades, totalRealizedPnl, isLoading: tradesLoading } = useGetTrades();
+    const [posTab, setPosTab] = useState<"open" | "closed">("open");
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [resetInput, setResetInput] = useState("");
+    const queryClient = useQueryClient();
+
+    const resetMutation = useMutation({
+        mutationFn: () => api.post("/api/portfolio/reset"),
+        onSuccess: () => {
+            toast.success("Portfolio reset", { description: "Balance restored to ₹10,00,000" });
+            queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+            queryClient.invalidateQueries({ queryKey: ["orders"] });
+            queryClient.invalidateQueries({ queryKey: ["trades"] });
+            setShowResetConfirm(false);
+            setResetInput("");
+        },
+        onError: () => toast.error("Reset failed", { description: "Please try again" }),
+    });
+
+    if (isLoading) {
+        return (
+            <div className="max-w-7xl mx-auto space-y-5">
+                <div className="h-7 w-28 bg-muted rounded animate-pulse" />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
+                    <div className="bg-card border border-border rounded-xl h-64 animate-pulse" />
+                    <div className="bg-card border border-border rounded-xl h-64 animate-pulse" />
+                </div>
+            </div>
+        );
+    }
+
+    if (!data) {
+        return (
+            <div className="max-w-7xl mx-auto">
+                <div className="bg-card border border-border rounded-xl p-16 text-center">
+                    <Wallet className="w-10 h-10 mx-auto mb-4 text-muted-foreground/30" />
+                    <p className="text-foreground font-medium mb-1">No portfolio data</p>
+                    <p className="text-sm text-muted-foreground mb-4">Connect to backend to see your portfolio</p>
+                    <Link href="/" className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:brightness-110 transition-all">
+                        Browse Markets
+                    </Link>
+                </div>
+            </div>
+        );
+    }
+
+    const {
+        totalPortfolioValue = 0,
+        holdingsValue = 0,
+        unrealizedPnl = 0,
+        overallPnl = 0,
+        buyingPower = 0,
+        portfolioHoldings = [],
+        equityHistory = [],
+    } = data;
+
+    const pieData = portfolioHoldings.map((h) => ({
+        name: h.symbol.replace(".NS", ""),
+        value: parseFloat(h.allocation as any) || 0,
+    }));
+
+    const pnlPositive = overallPnl >= 0;
+    const unrealPnlPositive = unrealizedPnl >= 0;
+    const realizedPositive = totalRealizedPnl >= 0;
+
+    // Closed positions: group sell trades by symbol, sum realized PnL
+    const closedPositions = trades
+        .filter((t) => t.side === "sell")
+        .reduce<Record<string, { symbol: string; qty: number; avgCostBasis: number; executionPrice: number; realizedPnl: number; lastFilled: string }>>((acc, t) => {
+            if (!acc[t.symbol]) {
+                acc[t.symbol] = { symbol: t.symbol, qty: 0, avgCostBasis: t.avgCostBasis, executionPrice: t.executionPrice, realizedPnl: 0, lastFilled: t.filledAt };
+            }
+            acc[t.symbol].qty += t.quantity;
+            acc[t.symbol].realizedPnl += t.realizedPnl;
+            if (t.filledAt > acc[t.symbol].lastFilled) acc[t.symbol].lastFilled = t.filledAt;
+            return acc;
+        }, {});
+
+    return (
+        <div className="max-w-7xl mx-auto space-y-5">
+            <div className="flex items-center justify-between">
+                <h1 className="text-xl font-semibold text-foreground">Portfolio</h1>
+                <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground font-mono hidden sm:inline">Updated every 30s</span>
+                    <button
+                        onClick={() => { setResetInput(""); setShowResetConfirm(true); }}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-down border border-border hover:border-down/40 rounded-lg px-3 py-1.5 transition-all"
                     >
-                      <td className="px-4 py-3 font-medium">{h.symbol}</td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        {h.qty}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        ₹{h.avgPrice.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        ₹{h.currentPrice.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span
-                          className={`font-mono ${pnl >= 0 ? "text-up" : "text-down"}`}
-                        >
-                          {pnl >= 0 ? "+" : ""}₹
-                          {pnl.toLocaleString("en-IN", {
-                            maximumFractionDigits: 0,
-                          })}
+                        <RotateCcw className="w-3 h-3" />
+                        Reset
+                    </button>
+                </div>
+            </div>
+
+            {/* Stats grid — 5 cards: 2 cols mobile, 5 cols desktop */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                <StatCard
+                    label="Total Portfolio Value"
+                    value={INR(totalPortfolioValue, 0)}
+                    sub={`${pnlPositive ? "+" : ""}${INR(overallPnl, 0)} overall`}
+                    positive={pnlPositive}
+                    icon={pnlPositive ? TrendingUp : TrendingDown}
+                    accentClass={pnlPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
+                />
+                <StatCard
+                    label="Cash Balance"
+                    value={INR(buyingPower, 0)}
+                    sub="Available to trade"
+                    icon={Wallet}
+                    accentClass="bg-primary/10 text-primary"
+                />
+                <StatCard
+                    label="Holdings Value"
+                    value={INR(holdingsValue, 0)}
+                    sub={`${portfolioHoldings.length} position${portfolioHoldings.length !== 1 ? "s" : ""}`}
+                    icon={BarChart3}
+                    accentClass="bg-accent/10 text-accent"
+                />
+                <StatCard
+                    label="Unrealized P&L"
+                    value={`${unrealPnlPositive ? "+" : ""}${INR(unrealizedPnl, 0)}`}
+                    sub="Open positions"
+                    positive={unrealizedPnl === 0 ? undefined : unrealPnlPositive}
+                    icon={unrealPnlPositive ? TrendingUp : TrendingDown}
+                    accentClass={unrealizedPnl === 0 ? "bg-muted text-muted-foreground" : unrealPnlPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
+                />
+                <StatCard
+                    label="Realized P&L"
+                    value={`${realizedPositive ? "+" : ""}${INR(totalRealizedPnl, 0)}`}
+                    sub="From closed trades"
+                    positive={totalRealizedPnl === 0 ? undefined : realizedPositive}
+                    icon={DollarSign}
+                    accentClass={totalRealizedPnl === 0 ? "bg-muted text-muted-foreground" : realizedPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
+                />
+            </div>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5">
+                {/* Allocation donut */}
+                <div className="bg-card border border-border rounded-xl p-5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                        Asset Allocation
+                    </p>
+                    {pieData.length > 0 ? (
+                        <>
+                            <ResponsiveContainer width="100%" height={160}>
+                                <PieChart>
+                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={72} dataKey="value" stroke="none">
+                                        {pieData.map((_, i) => (
+                                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <div className="space-y-1.5 mt-3">
+                                {pieData.map((entry, i) => (
+                                    <div key={entry.name} className="flex items-center gap-2 text-xs">
+                                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
+                                        <span className="text-muted-foreground flex-1 truncate">{entry.name}</span>
+                                        <span className="font-mono font-medium text-foreground">{entry.value}%</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="h-[160px] flex flex-col items-center justify-center text-center gap-2">
+                            <BarChart3 className="w-8 h-8 text-muted-foreground/20" />
+                            <p className="text-xs text-muted-foreground">No holdings yet</p>
+                            <Link href="/" className="text-xs text-primary hover:underline">Browse Markets →</Link>
+                        </div>
+                    )}
+                </div>
+
+                {/* Equity curve */}
+                <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-4">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Portfolio Value (30 Days)</p>
+                        <span className={cn("text-xs font-mono font-semibold", pnlPositive ? "text-up" : "text-down")}>
+                            {pnlPositive ? "+" : ""}{INR(overallPnl, 0)}
                         </span>
-                        <span
-                          className={`text-xs ml-1 ${pnl >= 0 ? "text-up" : "text-down"}`}
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                        <AreaChart data={equityHistory}>
+                            <defs>
+                                <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#00d97e" stopOpacity={0.15} />
+                                    <stop offset="95%" stopColor="#00d97e" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="2 4" stroke="#1e2a3a" vertical={false} />
+                            <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#4b5563" }} axisLine={false} tickLine={false} interval={5} />
+                            <YAxis
+                                tick={{ fontSize: 9, fill: "#4b5563" }} axisLine={false} tickLine={false}
+                                domain={["auto", "auto"]}
+                                tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                                width={52}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Area type="monotone" dataKey="equity" stroke="#00d97e" strokeWidth={2} fill="url(#equityGrad)" dot={false} />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* Positions table — Open / Closed tabs */}
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+                {/* Tab bar */}
+                <div className="flex border-b border-border">
+                    {(["open", "closed"] as const).map((tab) => (
+                        <button
+                            key={tab}
+                            onClick={() => setPosTab(tab)}
+                            className={cn(
+                                "px-5 py-3.5 text-xs font-bold border-b-2 flex items-center gap-2 transition-all capitalize",
+                                posTab === tab
+                                    ? "border-primary text-primary"
+                                    : "border-transparent text-muted-foreground hover:text-foreground",
+                            )}
                         >
-                          ({pnlPercent >= 0 ? "+" : ""}
-                          {pnlPercent.toFixed(2)}%)
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="text-center py-10 text-muted-foreground"
-                  >
-                    No active positions.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                            {tab === "open" ? "Open Positions" : "Closed Positions"}
+                            <span className={cn(
+                                "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                                posTab === tab ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                            )}>
+                                {tab === "open" ? portfolioHoldings.length : Object.keys(closedPositions).length}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Open positions */}
+                {posTab === "open" && (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-[11px] text-muted-foreground border-b border-border/50 uppercase tracking-wider">
+                                    <th className="text-left px-5 py-3 font-semibold">Symbol</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Qty</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Avg Cost</th>
+                                    <th className="text-right px-5 py-3 font-semibold">LTP</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Market Value</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Unrealized P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {portfolioHoldings.length > 0 ? portfolioHoldings.map((h) => {
+                                    const pnl = (h.currentPrice - h.avgPrice) * h.qty;
+                                    const pnlPct = h.avgPrice > 0 ? ((h.currentPrice - h.avgPrice) / h.avgPrice) * 100 : 0;
+                                    const pos = pnl >= 0;
+                                    return (
+                                        <tr key={h.symbol} className="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors">
+                                            <td className="px-5 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                                                        {h.symbol[0]}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-sm">{h.symbol.replace(".NS", "")}</p>
+                                                        <p className="text-[10px] text-muted-foreground">{h.symbol}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{h.qty}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.avgPrice)}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.currentPrice)}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.marketValue ?? h.currentPrice * h.qty, 0)}</td>
+                                            <td className="px-5 py-4 text-right">
+                                                <p className={cn("font-mono text-sm font-semibold", pos ? "text-up" : "text-down")}>
+                                                    {pos ? "+" : ""}{INR(pnl, 0)}
+                                                </p>
+                                                <p className={cn("text-[10px]", pos ? "text-up" : "text-down")}>
+                                                    {pos ? "+" : ""}{pnlPct.toFixed(2)}%
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    );
+                                }) : (
+                                    <tr>
+                                        <td colSpan={6} className="py-16 text-center">
+                                            <Wallet className="w-8 h-8 mx-auto mb-3 text-muted-foreground/20" />
+                                            <p className="text-sm text-muted-foreground mb-1">No open positions</p>
+                                            <Link href="/" className="text-xs text-primary hover:underline">Browse Markets →</Link>
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                {/* Closed positions */}
+                {posTab === "closed" && (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-[11px] text-muted-foreground border-b border-border/50 uppercase tracking-wider">
+                                    <th className="text-left px-5 py-3 font-semibold">Symbol</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Total Qty Sold</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Avg Cost</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Avg Sell Price</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Last Filled</th>
+                                    <th className="text-right px-5 py-3 font-semibold">Realized P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {Object.values(closedPositions).length > 0 ? Object.values(closedPositions).map((cp) => {
+                                    const pos = cp.realizedPnl >= 0;
+                                    const pct = cp.avgCostBasis > 0 ? (cp.realizedPnl / (cp.avgCostBasis * cp.qty)) * 100 : 0;
+                                    return (
+                                        <tr key={cp.symbol} className="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors">
+                                            <td className="px-5 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground text-xs font-bold shrink-0">
+                                                        {cp.symbol[0]}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-sm">{cp.symbol.replace(".NS", "")}</p>
+                                                        <p className="text-[10px] text-muted-foreground">{cp.symbol}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{cp.qty}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(cp.avgCostBasis)}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(cp.executionPrice)}</td>
+                                            <td className="px-5 py-4 text-right text-xs text-muted-foreground">{formatDate(cp.lastFilled)}</td>
+                                            <td className="px-5 py-4 text-right">
+                                                <p className={cn("font-mono text-sm font-semibold", pos ? "text-up" : "text-down")}>
+                                                    {pos ? "+" : ""}{INR(cp.realizedPnl, 0)}
+                                                </p>
+                                                <p className={cn("text-[10px]", pos ? "text-up" : "text-down")}>
+                                                    {pos ? "+" : ""}{pct.toFixed(2)}%
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    );
+                                }) : (
+                                    <tr>
+                                        <td colSpan={6} className="py-16 text-center">
+                                            {tradesLoading ? (
+                                                <div className="flex justify-center"><div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+                                            ) : (
+                                                <>
+                                                    <DollarSign className="w-8 h-8 mx-auto mb-3 text-muted-foreground/20" />
+                                                    <p className="text-sm text-muted-foreground mb-1">No closed positions yet</p>
+                                                    <p className="text-xs text-muted-foreground/60">Realized P&L appears here after you sell a position</p>
+                                                </>
+                                            )}
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Reset confirmation modal */}
+            {showResetConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+                        <div className="px-6 py-4 border-b border-border bg-[hsl(var(--down)/0.06)] flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-[hsl(var(--down)/0.15)] flex items-center justify-center">
+                                    <AlertTriangle className="w-4 h-4 text-down" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-foreground">Reset Portfolio</p>
+                                    <p className="text-[11px] text-muted-foreground">This action cannot be undone</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setShowResetConfirm(false); setResetInput(""); }}
+                                className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-muted transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="px-6 py-5 space-y-4">
+                            <p className="text-sm text-muted-foreground leading-relaxed">
+                                All your holdings, open orders, and trade history will be permanently deleted.
+                                Your balance will be restored to <span className="text-foreground font-semibold">₹10,00,000</span>.
+                            </p>
+                            <div className="bg-[hsl(var(--down)/0.06)] border border-[hsl(var(--down)/0.25)] rounded-lg p-3 text-xs text-down space-y-1">
+                                <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> What will be deleted:</p>
+                                <p className="text-down/80 pl-4">· All open &amp; filled orders</p>
+                                <p className="text-down/80 pl-4">· All trade history &amp; realized P&amp;L</p>
+                                <p className="text-down/80 pl-4">· All holdings &amp; positions</p>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-muted-foreground">
+                                    Type <span className="text-foreground font-bold font-mono">RESET</span> to confirm
+                                </label>
+                                <input
+                                    type="text"
+                                    value={resetInput}
+                                    onChange={(e) => setResetInput(e.target.value)}
+                                    placeholder="Type RESET here"
+                                    className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/50 transition-colors"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="px-6 pb-5 grid grid-cols-2 gap-3">
+                            <button
+                                onClick={() => { setShowResetConfirm(false); setResetInput(""); }}
+                                className="py-2.5 rounded-xl text-sm font-semibold bg-muted text-foreground hover:bg-muted/70 transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => resetMutation.mutate()}
+                                disabled={resetInput !== "RESET" || resetMutation.isPending}
+                                className="py-2.5 rounded-xl text-sm font-semibold bg-[hsl(var(--down)/0.15)] text-down border border-[hsl(var(--down)/0.3)] hover:bg-[hsl(var(--down)/0.25)] disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                            >
+                                {resetMutation.isPending ? (
+                                    <><Loader2 className="w-4 h-4 animate-spin" /> Resetting…</>
+                                ) : (
+                                    <><RotateCcw className="w-4 h-4" /> Reset Portfolio</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-      </div>
-    </div>
-  );
+    );
 }

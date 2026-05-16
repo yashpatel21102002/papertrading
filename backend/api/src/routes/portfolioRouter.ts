@@ -2,26 +2,28 @@ import { Router, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import axios from 'axios';
+import logger from '../utils/logger';
 
+const log = logger.child({ module: 'portfolio-router' });
 const router = Router();
-const ENGINE_URL = process.env.ENGINE_URL || 'http://localhost:5000';
+const ENGINE_URL = process.env.ENGINE_URL || 'http://localhost:8002';
 
 /**
  * Fetches all live prices from the engine in a single call.
  * Returns a map: { "AAPL": 182.5, "TSLA": 245.1, ... }
  */
-async function fetchAllPrices(): Promise<Record<string, number>> {
+export async function fetchAllPrices(): Promise<Record<string, number>> {
     try {
-        const response = await axios.get<Record<string, { price: number }>>(
+        const response = await axios.get<Record<string, { regularMarketPrice: number }>>(
             `${ENGINE_URL}/api/market`
         );
         const priceMap: Record<string, number> = {};
         for (const [symbol, data] of Object.entries(response.data)) {
-            if (data?.price) priceMap[symbol] = data.price;
+            if (data?.regularMarketPrice) priceMap[symbol] = data.regularMarketPrice;
         }
         return priceMap;
     } catch (err) {
-        console.warn('[Portfolio] Engine price fetch failed, falling back to avg prices');
+        log.warn('Engine price fetch failed, falling back to avg prices');
         return {};
     }
 }
@@ -34,10 +36,14 @@ router.get('/summary', async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id!;
 
     try {
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            include: { holdings: true }
-        });
+        const [user, rawSnapshots] = await prisma.$transaction([
+            prisma.user.findUnique({ where: { id: userId }, include: { holdings: true } }),
+            prisma.equitySnapshot.findMany({
+                where: { userId },
+                orderBy: { date: 'asc' },
+                take: 30,
+            }),
+        ]);
 
         if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -73,30 +79,107 @@ router.get('/summary', async (req: AuthRequest, res: Response) => {
                 : '0.0',
         }));
 
-        // Total unrealized PnL across all positions
-        const totalPnl = totalEquity - totalCostBasis;
+        // Total unrealized PnL across all open positions
+        const unrealizedPnl = totalEquity - totalCostBasis;
 
-        // equity history - mock for now, replace with DB snapshots later
-        // Tip: persist a daily `EquitySnapshot` model to make this real
-        const baseEquity = totalEquity + user.balance + user.lockedBalance;
-        const equityHistory = Array.from({ length: 30 }, (_, i) => ({
-            date: new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString(
-                'en-IN',
-                { month: 'short', day: 'numeric' }
-            ),
-            equity: Math.max(0, baseEquity - (29 - i) * 500),
-        }));
+        // True portfolio value = cash + locked cash + holdings market value
+        const totalPortfolioValue = user.balance + user.lockedBalance + totalEquity;
+
+        // Overall PnL vs starting balance of ₹10,00,000
+        const INITIAL_BALANCE = 1_000_000;
+        const overallPnl = totalPortfolioValue - INITIAL_BALANCE;
+
+        // Build 30-point equity history from real snapshots.
+        // Pad the front with INITIAL_BALANCE entries when fewer than 30 snapshots exist.
+        const DAYS = 30;
+        const snapCount = rawSnapshots.length;
+        const equityHistory = Array.from({ length: DAYS }, (_, i) => {
+            const snapshotIdx = i - (DAYS - snapCount);
+            if (snapshotIdx < 0) {
+                // Before the user's first snapshot — show starting balance
+                const msAgo = (DAYS - 1 - i) * 86_400_000;
+                return {
+                    date: new Date(Date.now() - msAgo).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+                    equity: INITIAL_BALANCE,
+                };
+            }
+            const snap = rawSnapshots[snapshotIdx];
+            return {
+                date: new Date(snap.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+                equity: snap.value,
+            };
+        });
 
         return res.json({
-            totalEquity,
-            todayPnl: totalPnl,         // frontend labels this "Total PnL" — matches
+            totalPortfolioValue,   // cash + locked + holdings — the real portfolio value
+            holdingsValue: totalEquity,
+            unrealizedPnl,
+            overallPnl,
             buyingPower: user.balance,
             portfolioHoldings,
             equityHistory,
         });
     } catch (error) {
-        console.error('[Portfolio] Summary failed:', error);
+        log.error({ err: error, userId }, 'Portfolio summary failed');
         return res.status(500).json({ error: 'Portfolio sync failed' });
+    }
+});
+
+/**
+ * GET /api/portfolio/trades
+ * Full trade history with per-trade realized P&L and running total.
+ */
+router.get('/trades', async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.id!;
+
+    try {
+        const [trades, agg] = await prisma.$transaction([
+            prisma.trade.findMany({
+                where: { userId },
+                orderBy: { filledAt: 'desc' },
+                take: 200,
+            }),
+            prisma.trade.aggregate({
+                where: { userId, side: 'sell' },
+                _sum: { realizedPnl: true },
+            }),
+        ]);
+
+        return res.json({
+            trades,
+            totalRealizedPnl: agg._sum.realizedPnl ?? 0,
+        });
+    } catch (error) {
+        log.error({ err: error, userId }, 'Trade history fetch failed');
+        return res.status(500).json({ error: 'Failed to fetch trade history' });
+    }
+});
+
+/**
+ * POST /api/portfolio/reset
+ * Wipes all holdings, orders, and trades for the user, restores the ₹10L starting balance.
+ * Orders already live in the engine's memory will be skipped gracefully by the consumer
+ * when they fill (order not found in DB → log warn → return).
+ */
+router.post('/reset', async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.id!;
+
+    try {
+        await prisma.$transaction([
+            prisma.trade.deleteMany({ where: { userId } }),
+            prisma.order.deleteMany({ where: { userId } }),
+            prisma.holding.deleteMany({ where: { userId } }),
+            prisma.user.update({
+                where: { id: userId },
+                data: { balance: 1_000_000, lockedBalance: 0 },
+            }),
+        ]);
+
+        log.info({ userId }, 'Portfolio reset to ₹10,00,000');
+        return res.json({ message: 'Portfolio reset successfully' });
+    } catch (error) {
+        log.error({ err: error, userId }, 'Portfolio reset failed');
+        return res.status(500).json({ error: 'Reset failed' });
     }
 });
 
@@ -121,7 +204,7 @@ router.get('/portfolio', async (req: AuthRequest, res: Response) => {
             holdings,
         });
     } catch (error) {
-        console.error('[Portfolio] Fetch failed:', error);
+        log.error({ err: error, userId }, 'Portfolio fetch failed');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });

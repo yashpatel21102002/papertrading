@@ -3,6 +3,8 @@ import { RedisClient } from "./redisClient";
 import { orders, reverseOrders } from "../store/orderStore";
 import { publishOrderEvent } from "../kafka/orderProducer";
 import { marketManager, MarketStateCode } from "./MarketManager";
+import { CircuitBreaker } from "./circuitBreaker";
+import { removeOrder } from "../store/orderPersistence";
 import logger from "./logger";
 
 const log = logger.child({ module: 'poller' });
@@ -18,6 +20,12 @@ const yahooFinance = new YahooFinance({
 
 const redisClient = RedisClient.getclient();
 
+const yahooBreaker = new CircuitBreaker(
+    'yahoo-finance',
+    5,       // open after 5 consecutive failures
+    60_000,  // retry after 60 s
+);
+
 const IMPORTANT_FIELDS = [
     "symbol",
     "regularMarketPrice",
@@ -28,6 +36,9 @@ const IMPORTANT_FIELDS = [
     "regularMarketDayHigh",
     "regularMarketDayLow",
     "regularMarketVolume",
+    "fiftyTwoWeekHigh",
+    "fiftyTwoWeekLow",
+    "marketCap",
     "marketState",
     "exchange",
     "fullExchangeName",
@@ -47,9 +58,15 @@ export async function fetchStockData() {
     isPolling = true;
 
     try {
-        const rawQuotes = await yahooFinance.quote(symbolsArray, { fields: IMPORTANT_FIELDS });
-        const quotes = Array.isArray(rawQuotes) ? rawQuotes : [rawQuotes];
+        if (yahooBreaker.isOpen()) {
+            log.warn({ state: yahooBreaker.getState() }, 'Circuit breaker OPEN — skipping Yahoo Finance poll');
+            return;
+        }
 
+        const rawQuotes = await yahooFinance.quote(symbolsArray, { fields: IMPORTANT_FIELDS });
+        yahooBreaker.onSuccess();
+
+        const quotes = Array.isArray(rawQuotes) ? rawQuotes : [rawQuotes];
         let anyMarketOpen = false;
 
         for (const stockData of quotes) {
@@ -68,11 +85,27 @@ export async function fetchStockData() {
                 regularMarketDayHigh: stockData.regularMarketDayHigh ?? null,
                 regularMarketDayLow: stockData.regularMarketDayLow ?? null,
                 regularMarketVolume: stockData.regularMarketVolume ?? null,
+                fiftyTwoWeekHigh: (stockData as any).fiftyTwoWeekHigh ?? null,
+                fiftyTwoWeekLow: (stockData as any).fiftyTwoWeekLow ?? null,
+                marketCap: (stockData as any).marketCap ?? null,
                 marketState: (stockData.marketState ?? 'CLOSED') as MarketStateCode,
                 exchange: stockData.exchange ?? null,
                 fullExchangeName: stockData.fullExchangeName ?? null,
                 currency: stockData.currency ?? null,
                 shortName: stockData.shortName ?? null,
+            });
+
+            // Always publish price ticks so WS clients get updates in pre/post market too.
+            redisClient.publisher.publish(`stock:${stockData.symbol}`, JSON.stringify({
+                symbol: stockData.symbol,
+                regularMarketPrice: stockData.regularMarketPrice,
+                regularMarketChange: stockData.regularMarketChange,
+                regularMarketChangePercent: stockData.regularMarketChangePercent,
+                regularMarketTime: stockData.regularMarketTime,
+                marketState: stockData.marketState,
+                shortName: stockData.shortName,
+            })).catch((err) => {
+                log.error({ err, symbol: stockData.symbol }, 'Redis publish failed for price update');
             });
 
             if (!marketManager.isMarketOpen(stockData.symbol)) {
@@ -81,24 +114,13 @@ export async function fetchStockData() {
             }
 
             anyMarketOpen = true;
-
             matchOrders(stockData.symbol, stockData.regularMarketPrice);
-
-            redisClient.publisher.publish(`stock:${stockData.symbol}`, JSON.stringify({
-                symbol: stockData.symbol,
-                regularMarketPrice: stockData.regularMarketPrice,
-                regularMarketChange: stockData.regularMarketChange,
-                regularMarketChangePercent: stockData.regularMarketChangePercent,
-                regularMarketTime: stockData.regularMarketTime,
-                shortName: stockData.shortName,
-            })).catch((err) => {
-                log.error({ err, symbol: stockData.symbol }, 'Redis publish failed for price update');
-            });
         }
 
         intervalTime = anyMarketOpen ? DEFAULT_INTERVAL : CLOSED_MARKET_INTERVAL;
 
     } catch (error) {
+        yahooBreaker.onFailure();
         log.error({ err: error }, 'Failed to fetch quotes from Yahoo Finance');
     } finally {
         isPolling = false;
@@ -112,18 +134,23 @@ function matchOrders(symbol: string, currentPrice: number) {
 
     const remainingOrders = ordersArray.filter(order => {
         const state = reverseOrders.get(order.orderId);
-
         if (!state || state.status !== 'open') return false;
 
-        const isBuyFilled = order.side === 'buy' && currentPrice <= order.price;
-        const isSellFilled = order.side === 'sell' && currentPrice >= order.price;
+        // Market orders fill at any price; limit orders check the price condition.
+        const isBuyFilled = order.side === 'buy' && (order.type === 'market' || currentPrice <= order.price);
+        const isSellFilled = order.side === 'sell' && (order.type === 'market' || currentPrice >= order.price);
 
         if (isBuyFilled || isSellFilled) {
             reverseOrders.delete(order.orderId);
 
+            // Remove from Redis — order is resolved, no need to restore on restart.
+            removeOrder(order.orderId).catch((err) =>
+                log.error({ err, orderId: order.orderId }, 'Failed to remove filled order from Redis'),
+            );
+
             log.info(
                 { orderId: order.orderId, symbol, side: order.side, limitPrice: order.price, executionPrice: currentPrice },
-                'Order filled'
+                'Order filled',
             );
 
             publishOrderEvent({

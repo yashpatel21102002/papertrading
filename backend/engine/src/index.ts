@@ -10,15 +10,20 @@ import marketRouter from './routes/marketRouter';
 import { createTopics } from './kafka/admin';
 import { connectProducer, disconnectProducer } from './kafka/orderProducer';
 import { connectConsumer, disconnectConsumer } from './kafka/orderConsumer';
+import { restoreOrdersFromRedis } from './store/orderPersistence';
 
 const log = logger.child({ module: 'server' });
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8002;
 
 app.use(cors());
 app.use(express.json());
 app.use("/api/market", marketRouter);
+
+app.get('/health', (_req, res) => {
+    res.json({ status: 'ok' });
+});
 
 async function shutdown(signal: string) {
     log.info({ signal }, 'Shutdown signal received, closing connections');
@@ -33,6 +38,8 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 async function main() {
     await RedisClient.connect();
+    // Rebuild in-memory order store before the consumer starts processing new messages.
+    await restoreOrdersFromRedis();
     await createTopics();
     await connectProducer();
     await connectConsumer();

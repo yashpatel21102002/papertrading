@@ -7,9 +7,13 @@ export async function createTopics(): Promise<void> {
     const admin = kafka.admin();
     try {
         await admin.connect();
+        // 10 partitions per topic allows up to 10 parallel consumer instances.
+        // Producers key by symbol so all events for the same symbol go to the same
+        // partition — this guarantees per-symbol ordering across create / cancel / fill.
+        const numPartitions = process.env.KAFKA_PARTITIONS ? parseInt(process.env.KAFKA_PARTITIONS) : 10;
         const topicList = Object.values(TOPICS).map(topic => ({
             topic,
-            numPartitions: 1,
+            numPartitions,
             replicationFactor: 1,
         }));
         const created = await admin.createTopics({ topics: topicList, waitForLeaders: true });

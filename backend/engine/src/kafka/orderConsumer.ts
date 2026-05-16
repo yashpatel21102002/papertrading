@@ -1,6 +1,7 @@
 import { Consumer } from 'kafkajs';
 import { kafka, TOPICS } from './kafkaClient';
 import { orders, reverseOrders, OrderEntry } from '../store/orderStore';
+import { persistOrder, removeOrder } from '../store/orderPersistence';
 import { marketManager } from '../utils/MarketManager';
 import { publishOrderEvent } from './orderProducer';
 import logger from '../utils/logger';
@@ -52,7 +53,7 @@ interface OrderCreatedPayload {
     orderId: string;
     symbol: string;
     quantity: number;
-    price: number;
+    price: number | null; // null for market orders
     side: 'buy' | 'sell';
     type: 'limit' | 'market';
 }
@@ -60,25 +61,52 @@ interface OrderCreatedPayload {
 async function handleOrderCreated(payload: OrderCreatedPayload): Promise<void> {
     const { orderId, symbol, quantity, price, side, type } = payload;
 
-    if (!orderId || !symbol || !quantity || !price || !side || !type) {
+    if (!orderId || !symbol || !quantity || !side || !type) {
         log.warn({ payload }, 'Malformed order.created message, skipping');
+        return;
+    }
+
+    if (type === 'limit' && (price === null || price <= 0)) {
+        log.warn({ payload }, 'Limit order missing valid price, skipping');
         return;
     }
 
     if (!marketManager.isMarketOpen(symbol)) {
         log.warn({ orderId, symbol }, 'Order rejected — market is not REGULAR');
-        await publishOrderEvent({ orderId, symbol, quantity, price, side, type, status: 'cancelled' });
+        await publishOrderEvent({ orderId, symbol, quantity, price: price ?? 0, side, type, status: 'cancelled' });
         return;
     }
 
-    const entry: OrderEntry = { orderId, quantity, price, side, type };
+    // Market orders fill immediately at the current live price.
+    if (type === 'market') {
+        const executionPrice = marketManager.getPrice(symbol);
+        if (!executionPrice) {
+            log.warn({ orderId, symbol }, 'Market order cancelled — no price data available');
+            await publishOrderEvent({ orderId, symbol, quantity, price: 0, side, type, status: 'cancelled' });
+            return;
+        }
+
+        log.info({ orderId, symbol, side, quantity, executionPrice }, 'Market order filled immediately');
+        await publishOrderEvent({ orderId, symbol, quantity, price: 0, side, type, status: 'open' });
+        await publishOrderEvent({ orderId, symbol, quantity, price: 0, side, type, executionPrice, status: 'filled' });
+        return;
+    }
+
+    // Limit order: add to in-memory store for matching on future price ticks.
+    const entry: OrderEntry = { orderId, quantity, price: price!, side, type };
     if (!orders.has(symbol)) orders.set(symbol, []);
     orders.get(symbol)!.push(entry);
-    reverseOrders.set(orderId, { symbol, quantity, price, side, type, status: 'open' });
+    const state = { symbol, quantity, price: price!, side, type, status: 'open' as const };
+    reverseOrders.set(orderId, state);
 
-    log.info({ orderId, symbol, side, type, price, quantity }, 'Order registered');
+    // Persist to Redis so the order survives an engine restart.
+    persistOrder(orderId, state).catch((err) =>
+        log.error({ err, orderId }, 'Failed to persist order to Redis'),
+    );
 
-    await publishOrderEvent({ orderId, symbol, quantity, price, side, type, status: 'open' });
+    log.info({ orderId, symbol, side, type, price, quantity }, 'Limit order registered');
+
+    await publishOrderEvent({ orderId, symbol, quantity, price: price!, side, type, status: 'open' });
 }
 
 async function handleOrderCancelRequested(payload: { orderId: string }): Promise<void> {
@@ -100,10 +128,15 @@ async function handleOrderCancelRequested(payload: { orderId: string }): Promise
         return;
     }
 
-    // Clean up in-memory store immediately so matchOrders skips it on next tick
+    // Clean up in-memory store immediately so matchOrders skips it on next tick.
     reverseOrders.delete(orderId);
     const symbolOrders = orders.get(state.symbol) || [];
     orders.set(state.symbol, symbolOrders.filter(o => o.orderId !== orderId));
+
+    // Remove from Redis so it isn't restored on next engine restart.
+    removeOrder(orderId).catch((err) =>
+        log.error({ err, orderId }, 'Failed to remove cancelled order from Redis'),
+    );
 
     log.info({ orderId, symbol: state.symbol }, 'Order cancelled');
 

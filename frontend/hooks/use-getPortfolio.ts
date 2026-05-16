@@ -1,31 +1,45 @@
 "use client";
+
+import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/axios";
-import axios from "axios";
-import { useState, useEffect } from "react";
-// This hook is responsible for fetching portfolio data from the backend and providing it to components that need it. It abstracts away the details of the API call and state management, making it easier for components to access portfolio data without worrying about how it's fetched or stored.
+
+export interface PortfolioHolding {
+    symbol: string;
+    allocation: string;
+    qty: number;
+    avgPrice: number;
+    currentPrice: number;
+    marketValue: number;
+}
+
+export interface Portfolio {
+    totalPortfolioValue: number;
+    holdingsValue: number;
+    unrealizedPnl: number;
+    overallPnl: number;
+    buyingPower: number;
+    portfolioHoldings: PortfolioHolding[];
+    equityHistory: { date: string; equity: number }[];
+    /** convenience alias for buyingPower used by TopNav */
+    balance: number;
+}
+
+async function fetchPortfolio(): Promise<Portfolio> {
+    const res = await api.get<Omit<Portfolio, "balance">>("/api/portfolio/summary");
+    return { ...res.data, balance: res.data.buyingPower };
+}
 
 export default function useGetPortfolio() {
-    const [portfolio, setPortfolio] = useState(null);
-    const [error, setError] = useState(null);
+    const query = useQuery({
+        queryKey: ["portfolio"],
+        queryFn: fetchPortfolio,
+        refetchInterval: 30000,
+        staleTime: 25000,
+    });
 
-    useEffect(() => {
-        const fetchPortfolio = async () => {
-            try {
-                const response = await api.get("/api/portfolio/portfolio")
-                setPortfolio(response.data);
-            } catch (error) {
-                setError(error instanceof axios.AxiosError ? error.message : "An unexpected error occurred");
-            }
-        }
-
-        fetchPortfolio();
-
-        // Cleanup function to reset state when the component unmounts
-        return () => {
-            setPortfolio(null);
-            setError(null);
-        };
-    }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
-
-    return { portfolio, error };
+    return {
+        portfolio: query.data ?? null,
+        error: query.error ? (query.error as Error).message : null,
+        isLoading: query.isLoading,
+    };
 }

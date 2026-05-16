@@ -12,7 +12,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     if (!token) return res.status(401).json({ error: "Access denied. No token provided." });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecret') as { id: string; email: string };
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string; email: string };
         req.user = decoded;
         next();
     } catch (error) {

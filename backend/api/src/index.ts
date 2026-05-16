@@ -5,34 +5,63 @@ import authRouter from './routes/authRouter';
 import orderRouter from './routes/orderRouter';
 import portfolioRouter from './routes/portfolioRouter';
 import { authenticate } from './middleware/auth';
-import { startEngineSubscriber } from './utils/engineSubscriber';
 import { redisManager } from './utils/redisClient';
+import { connectProducer, disconnectProducer } from './kafka/orderProducer';
+import { connectConsumer, disconnectConsumer } from './kafka/orderConsumer';
+import { startSnapshotScheduler } from './utils/snapshotScheduler';
+import logger from './utils/logger';
 
 dotenv.config();
 
+const log = logger.child({ module: 'server' });
+
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8001;
 
 app.use(cors());
 app.use(express.json());
 
-// Public Routes
 app.use('/api/auth', authRouter);
-
-// Protected Routes
 app.use('/api/orders', authenticate, orderRouter);
 app.use('/api/portfolio', authenticate, portfolioRouter);
 
-async function bootstrap() {
-    // 1. Connect Redis first
-    await redisManager.connect();
+app.get('/health', (_req, res) => {
+    res.json({ status: 'ok' });
+});
 
-    // 2. Start Subscriber worker
-    startEngineSubscriber();
+let server: ReturnType<typeof app.listen>;
 
-    app.listen(Number(PORT), '0.0.0.0', () => {
-        console.log(`Server is running on port ${PORT}`);
-    })
+async function shutdown(signal: string) {
+    log.info({ signal }, 'Shutdown signal received, closing connections');
+    server.close(async () => {
+        await disconnectConsumer();
+        await disconnectProducer();
+        await redisManager.disconnect();
+        log.info('All connections closed');
+        process.exit(0);
+    });
 }
 
-bootstrap();
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+async function bootstrap() {
+    if (!process.env.JWT_SECRET) {
+        log.fatal('JWT_SECRET environment variable is not set — refusing to start');
+        process.exit(1);
+    }
+
+    await redisManager.connect();
+    await connectProducer();
+    await connectConsumer();
+    startSnapshotScheduler();
+
+    server = app.listen(Number(PORT), '0.0.0.0', () => {
+        log.info({ port: PORT }, 'API server started');
+    });
+}
+
+bootstrap().catch((err) => {
+    log.fatal({ err }, 'API failed to start, exiting');
+    process.exit(1);
+});

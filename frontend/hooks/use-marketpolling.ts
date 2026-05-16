@@ -1,7 +1,8 @@
-"use client"
-import { useState, useEffect, useRef } from "react"
-import axios from 'axios';
-import { set } from "date-fns";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 
 export interface MarketRange {
     low: number;
@@ -18,8 +19,8 @@ export interface StockQuote {
     customPriceAlertConfidence: string;
     currency: string;
     hasPrePostMarketData: boolean;
-    firstTradeDateMilliseconds: string; // ISO Date String
-    regularMarketTime: string;          // ISO Date String
+    firstTradeDateMilliseconds: string;
+    regularMarketTime: string;
     exchange: string;
     exchangeTimezoneName: string;
     exchangeTimezoneShortName: string;
@@ -55,29 +56,24 @@ export interface StockQuote {
 
 const MARKET_URL = process.env.NEXT_PUBLIC_MARKET_URL || "http://localhost:8002";
 
+async function fetchMarket(): Promise<Record<string, StockQuote>> {
+    const res = await axios.get<Record<string, StockQuote>>(`${MARKET_URL}/api/market`);
+    return res.data;
+}
+
 export const useMarketPolling = () => {
-    const [marketData, setMarketData] = useState<Record<string, StockQuote>>({});
     const [flashData, setFlashData] = useState<Record<string, "up" | "down" | null>>({});
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const prevPricesRef = useRef<Record<string, number>>({});
 
-    const fetchMarketData = async () => {
-        try {
-            setLoading(true);
-            const response = await axios.get<Record<string, StockQuote>>(`${MARKET_URL}/api/market`);
-            setMarketData(response.data);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : "Unknown error");
-        } finally {
-            setLoading(false);
-        }
+    const query = useQuery({
+        queryKey: ["market"],
+        queryFn: fetchMarket,
+        refetchInterval: 10000,
+        staleTime: 8000,
+    });
 
+    const marketData = query.data ?? {};
 
-    }
-
-    // Effect to detect price changes and trigger flashes
     useEffect(() => {
         const newFlashes: Record<string, "up" | "down"> = {};
         let hasChanges = false;
@@ -85,50 +81,24 @@ export const useMarketPolling = () => {
         Object.values(marketData).forEach((stock) => {
             const currentPrice = stock.regularMarketPrice;
             const prevPrice = prevPricesRef.current[stock.symbol];
-
-            // Compare with the price from the LAST poll
             if (prevPrice !== undefined && currentPrice !== prevPrice) {
                 newFlashes[stock.symbol] = currentPrice > prevPrice ? "up" : "down";
                 hasChanges = true;
             }
-
-            // Update ref for next comparison
             prevPricesRef.current[stock.symbol] = currentPrice;
         });
 
         if (hasChanges) {
             setFlashData(newFlashes);
-
-            // Clear the flash after 2 seconds to allow the CSS animation to reset
-            const timer = setTimeout(() => {
-                setFlashData({});
-            }, 2000);
-
+            const timer = setTimeout(() => setFlashData({}), 2000);
             return () => clearTimeout(timer);
-        }
-
-
-        //cleanup logic
-        return () => {
-            setFlashData({});
         }
     }, [marketData]);
 
-    useEffect(() => {
-        fetchMarketData(); // Initial fetch
-
-        // Set up polling every 10 seconds
-        intervalRef.current = setInterval(fetchMarketData, 10000);
-
-        // Cleanup on unmount
-        return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-            }
-        }
-
-
-    }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
-
-    return { marketData, flashData, loading, error };
-}
+    return {
+        marketData,
+        flashData,
+        loading: query.isLoading,
+        error: query.error ? (query.error as Error).message : null,
+    };
+};
