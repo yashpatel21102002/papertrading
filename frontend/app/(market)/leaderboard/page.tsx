@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 import useGetLeaderboard from "@/hooks/use-getLeaderboard";
 import { cn } from "@/lib/utils";
 import { Trophy, Medal, TrendingUp, TrendingDown, Loader2, Users } from "lucide-react";

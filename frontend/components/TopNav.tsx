@@ -1,10 +1,11 @@
 "use client";
-import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut, Keyboard, Trophy } from "lucide-react";
+import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut, Keyboard, Trophy, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import useGetPortfolio from "@/hooks/use-getPortfolio";
 import { useActivity } from "@/context/activity-context";
+import { Avatar } from "./Avatar";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -15,31 +16,30 @@ const navItems = [
   { label: "Leaderboard", path: "/leaderboard", icon: Trophy },
 ];
 
-function getAvatarInitial(): string {
-  if (typeof document === "undefined") return "U";
+function getEmailFromToken(): string {
+  if (typeof document === "undefined") return "";
   const cookie = document.cookie.split("; ").find((r) => r.startsWith("auth_token="));
-  if (!cookie) return "U";
+  if (!cookie) return "";
   try {
     const payload = JSON.parse(atob(cookie.split("=")[1].split(".")[1]));
-    const email: string = payload.email || payload.sub || "";
-    return email[0]?.toUpperCase() || "U";
+    return payload.email || payload.sub || "";
   } catch {
-    return "U";
+    return "";
   }
 }
 
 export function TopNav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [initial, setInitial] = useState("U");
+  const [email, setEmail] = useState("");
   const { portfolio } = useGetPortfolio();
   const { unreadCount } = useActivity();
   const pathname = usePathname();
   const router = useRouter();
 
-  // Client-only: decode JWT cookie after mount to get real email initial
+  // Client-only: decode JWT cookie after mount
   useEffect(() => {
-    setInitial(getAvatarInitial());
+    setEmail(getEmailFromToken());
   }, []);
 
   function handleLogout() {
@@ -121,21 +121,29 @@ export function TopNav() {
             )}
           </button>
 
+          {/* Theme toggle */}
           {/* User menu */}
           <div className="relative">
             <button
               onClick={() => setShowUserMenu((v) => !v)}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               aria-label="User menu"
             >
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary/40 to-primary/10 border border-primary/30 flex items-center justify-center shadow-inner">
-                <span className="text-[11px] font-bold text-primary leading-none">{initial}</span>
-              </div>
+              {email ? <Avatar email={email} size="sm" /> : <div className="w-7 h-7 rounded-full bg-muted" />}
             </button>
             {showUserMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-                <div className="absolute right-0 top-full mt-1.5 z-50 w-40 bg-card border border-border rounded-lg shadow-xl py-1 overflow-hidden">
+                <div className="absolute right-0 top-full mt-1.5 z-50 w-48 bg-card border border-border rounded-lg shadow-xl py-1 overflow-hidden">
+                  <Link
+                    href="/settings"
+                    onClick={() => setShowUserMenu(false)}
+                    className="flex items-center gap-2.5 w-full px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Settings
+                  </Link>
+                  <div className="border-t border-border" />
                   <button
                     onClick={handleLogout}
                     className="flex items-center gap-2.5 w-full px-3 py-2.5 text-sm text-muted-foreground hover:text-down hover:bg-muted transition-colors"

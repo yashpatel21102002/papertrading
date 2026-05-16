@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../utils/prisma';
+import { AuthRequest, authenticate } from '../middleware/auth';
 
 const router = Router();
 
@@ -65,6 +66,26 @@ router.post('/login', loginLimiter, async (req, res) => {
         res.json({ token });
     } catch {
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/change-password', authenticate, async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.id!;
+    const { newPassword } = req.body;
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await prisma.user.update({
+            where: { id: userId },
+            data: { password: hashedPassword },
+        });
+        res.json({ message: 'Password changed successfully' });
+    } catch {
+        res.status(500).json({ error: 'Failed to change password' });
     }
 });
 

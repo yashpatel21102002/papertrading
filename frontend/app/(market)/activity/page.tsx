@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useActivity, ActivityEvent, ActivityEventType } from "@/context/activity-context";

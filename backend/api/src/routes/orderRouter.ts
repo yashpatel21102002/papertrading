@@ -107,23 +107,20 @@ router.post('/create', orderCreateLimiter, async (req: AuthRequest, res: Respons
             });
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-        // Publish to Kafka outside the transaction — engine picks this up asynchronously.
-        try {
-            await produceOrderCreated({
-                orderId: order.id,
-                symbol,
-                quantity,
-                price: type === 'market' ? null : price,
-                side,
-                type,
-            });
-        } catch (kafkaErr) {
-            // Funds are locked but the engine won't see this order.
-            // The order will remain 'pending' indefinitely until manual intervention.
-            log.fatal({ err: kafkaErr, orderId: order.id }, 'Failed to publish order.created — order stuck pending, manual intervention required');
-        }
-
+        // Fire-and-forget: respond immediately, publish to Kafka in background.
+        // Funds are already locked in the DB so the order is safe even if Kafka is slow.
         res.status(201).json({ message: 'Order placed successfully', orderId: order.id });
+
+        produceOrderCreated({
+            orderId: order.id,
+            symbol,
+            quantity,
+            price: type === 'market' ? null : price,
+            side,
+            type,
+        }).catch((kafkaErr) => {
+            log.fatal({ err: kafkaErr, orderId: order.id }, 'Failed to publish order.created — order stuck pending, manual intervention required');
+        });
 
     } catch (err: any) {
         res.status(400).json({ error: err.message || 'Order creation failed' });

@@ -1,19 +1,26 @@
 import { Router, Response } from 'express';
 import { prisma } from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { redisManager } from '../utils/redisClient';
 import axios from 'axios';
 import logger from '../utils/logger';
 
 const log = logger.child({ module: 'portfolio-router' });
 const router = Router();
 const ENGINE_URL = process.env.ENGINE_URL || 'http://localhost:8002';
+const PRICE_CACHE_KEY = 'market:prices';
+const PRICE_CACHE_TTL = 5; // seconds — matches engine polling interval
 
 /**
- * Fetches all live prices from the engine in a single call.
- * Returns a map: { "AAPL": 182.5, "TSLA": 245.1, ... }
+ * Fetches all live prices, with a 5-second Redis cache to avoid hammering
+ * the engine on every concurrent portfolio/leaderboard request.
  */
 export async function fetchAllPrices(): Promise<Record<string, number>> {
     try {
+        const redis = redisManager.getClient();
+        const cached = await redis.get(PRICE_CACHE_KEY);
+        if (cached) return JSON.parse(cached);
+
         const response = await axios.get<Record<string, { regularMarketPrice: number }>>(
             `${ENGINE_URL}/api/market`
         );
@@ -21,6 +28,7 @@ export async function fetchAllPrices(): Promise<Record<string, number>> {
         for (const [symbol, data] of Object.entries(response.data)) {
             if (data?.regularMarketPrice) priceMap[symbol] = data.regularMarketPrice;
         }
+        await redis.set(PRICE_CACHE_KEY, JSON.stringify(priceMap), { EX: PRICE_CACHE_TTL });
         return priceMap;
     } catch (err) {
         log.warn('Engine price fetch failed, falling back to avg prices');

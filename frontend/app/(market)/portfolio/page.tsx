@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 import {
     TrendingUp, TrendingDown, Wallet, BarChart3, ArrowUpRight, ArrowDownRight, DollarSign,
     RotateCcw, AlertTriangle, Loader2, X, Target, Flame, Award, ThumbsDown,
@@ -158,6 +159,7 @@ export default function PortfolioPage() {
         }, {});
 
     // ── Analytics ──────────────────────────────────────────────────────────────
+    const INITIAL_BALANCE = 1_000_000;
     const sellTrades = trades.filter((t) => t.side === "sell");
     const winTrades  = sellTrades.filter((t) => t.realizedPnl > 0);
     const lossTrades = sellTrades.filter((t) => t.realizedPnl < 0);
@@ -169,6 +171,35 @@ export default function PortfolioPage() {
     const avgLoss = lossTrades.length > 0 ? grossLoss   / lossTrades.length : 0;
     const bestTrade  = sellTrades.length > 0 ? sellTrades.reduce((b, t) => t.realizedPnl > b.realizedPnl ? t : b) : null;
     const worstTrade = sellTrades.length > 0 ? sellTrades.reduce((w, t) => t.realizedPnl < w.realizedPnl ? t : w) : null;
+
+    // Advanced metrics: Sharpe ratio and max drawdown from equity history
+    const computeSharpeRatio = (history: typeof equityHistory) => {
+        if (history.length < 2) return 0;
+        const values = history.map(h => h.equity);
+        const returns = [];
+        for (let i = 1; i < values.length; i++) {
+            returns.push((values[i] - values[i - 1]) / values[i - 1]);
+        }
+        const avgReturn = returns.reduce((s, r) => s + r, 0) / returns.length;
+        const variance = returns.reduce((s, r) => s + Math.pow(r - avgReturn, 2), 0) / returns.length;
+        const stdDev = Math.sqrt(variance);
+        return stdDev > 0 ? (avgReturn * 252) / stdDev : 0; // annualized
+    };
+
+    const computeMaxDrawdown = (history: typeof equityHistory) => {
+        if (history.length === 0) return 0;
+        let maxValue = history[0].equity;
+        let maxDD = 0;
+        for (const h of history) {
+            if (h.equity > maxValue) maxValue = h.equity;
+            const dd = (maxValue - h.equity) / maxValue;
+            if (dd > maxDD) maxDD = dd;
+        }
+        return maxDD * 100;
+    };
+
+    const sharpeRatio = computeSharpeRatio(equityHistory);
+    const maxDrawdown = computeMaxDrawdown(equityHistory);
 
     return (
         <div className="max-w-7xl mx-auto space-y-5">
@@ -463,7 +494,7 @@ export default function PortfolioPage() {
                         ) : (
                             <>
                                 {/* Metric cards */}
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                                     {/* Win Rate */}
                                     <div className="bg-background border border-border rounded-xl p-4">
                                         <div className="flex items-center justify-between mb-2">
@@ -512,6 +543,30 @@ export default function PortfolioPage() {
                                             {lossTrades.length > 0 ? `-${INR(avgLoss, 0)}` : "—"}
                                         </p>
                                         <p className="text-[10px] text-muted-foreground mt-1">per losing trade</p>
+                                    </div>
+
+                                    {/* Sharpe Ratio */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Sharpe Ratio</span>
+                                            <BarChart3 className={cn("w-3.5 h-3.5", sharpeRatio > 1 ? "text-up" : sharpeRatio < -1 ? "text-down" : "text-muted-foreground")} />
+                                        </div>
+                                        <p className={cn("text-2xl font-mono font-bold", sharpeRatio > 1 ? "text-up" : sharpeRatio < -1 ? "text-down" : "text-foreground")}>
+                                            {sharpeRatio.toFixed(2)}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">risk-adjusted return</p>
+                                    </div>
+
+                                    {/* Max Drawdown */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Max Drawdown</span>
+                                            <TrendingDown className="w-3.5 h-3.5 text-down" />
+                                        </div>
+                                        <p className="text-2xl font-mono font-bold text-down">
+                                            -{maxDrawdown.toFixed(2)}%
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">peak to trough</p>
                                     </div>
                                 </div>
 
