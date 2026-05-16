@@ -1,7 +1,7 @@
 "use client";
 import {
     TrendingUp, TrendingDown, Wallet, BarChart3, ArrowUpRight, ArrowDownRight, DollarSign,
-    RotateCcw, AlertTriangle, Loader2, X,
+    RotateCcw, AlertTriangle, Loader2, X, Target, Flame, Award, ThumbsDown,
 } from "lucide-react";
 import {
     PieChart, Pie, Cell, ResponsiveContainer,
@@ -77,7 +77,7 @@ function CustomTooltip({ active, payload, label }: any) {
 export default function PortfolioPage() {
     const { portfolio: data, isLoading } = useGetPortfolio();
     const { trades, totalRealizedPnl, isLoading: tradesLoading } = useGetTrades();
-    const [posTab, setPosTab] = useState<"open" | "closed">("open");
+    const [posTab, setPosTab] = useState<"open" | "closed" | "analytics">("open");
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [resetInput, setResetInput] = useState("");
     const queryClient = useQueryClient();
@@ -156,6 +156,19 @@ export default function PortfolioPage() {
             if (t.filledAt > acc[t.symbol].lastFilled) acc[t.symbol].lastFilled = t.filledAt;
             return acc;
         }, {});
+
+    // ── Analytics ──────────────────────────────────────────────────────────────
+    const sellTrades = trades.filter((t) => t.side === "sell");
+    const winTrades  = sellTrades.filter((t) => t.realizedPnl > 0);
+    const lossTrades = sellTrades.filter((t) => t.realizedPnl < 0);
+    const winRate    = sellTrades.length > 0 ? (winTrades.length / sellTrades.length) * 100 : 0;
+    const grossProfit = winTrades.reduce((s, t) => s + t.realizedPnl, 0);
+    const grossLoss   = Math.abs(lossTrades.reduce((s, t) => s + t.realizedPnl, 0));
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+    const avgWin  = winTrades.length  > 0 ? grossProfit / winTrades.length  : 0;
+    const avgLoss = lossTrades.length > 0 ? grossLoss   / lossTrades.length : 0;
+    const bestTrade  = sellTrades.length > 0 ? sellTrades.reduce((b, t) => t.realizedPnl > b.realizedPnl ? t : b) : null;
+    const worstTrade = sellTrades.length > 0 ? sellTrades.reduce((w, t) => t.realizedPnl < w.realizedPnl ? t : w) : null;
 
     return (
         <div className="max-w-7xl mx-auto space-y-5">
@@ -287,23 +300,27 @@ export default function PortfolioPage() {
             <div className="bg-card border border-border rounded-xl overflow-hidden">
                 {/* Tab bar */}
                 <div className="flex border-b border-border">
-                    {(["open", "closed"] as const).map((tab) => (
+                    {([
+                        { id: "open",      label: "Open Positions",   count: portfolioHoldings.length },
+                        { id: "closed",    label: "Closed Positions", count: Object.keys(closedPositions).length },
+                        { id: "analytics", label: "Analytics",        count: sellTrades.length },
+                    ] as const).map((tab) => (
                         <button
-                            key={tab}
-                            onClick={() => setPosTab(tab)}
+                            key={tab.id}
+                            onClick={() => setPosTab(tab.id)}
                             className={cn(
-                                "px-5 py-3.5 text-xs font-bold border-b-2 flex items-center gap-2 transition-all capitalize",
-                                posTab === tab
+                                "px-5 py-3.5 text-xs font-bold border-b-2 flex items-center gap-2 transition-all",
+                                posTab === tab.id
                                     ? "border-primary text-primary"
                                     : "border-transparent text-muted-foreground hover:text-foreground",
                             )}
                         >
-                            {tab === "open" ? "Open Positions" : "Closed Positions"}
+                            {tab.label}
                             <span className={cn(
                                 "text-[10px] font-semibold px-1.5 py-0.5 rounded",
-                                posTab === tab ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                                posTab === tab.id ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
                             )}>
-                                {tab === "open" ? portfolioHoldings.length : Object.keys(closedPositions).length}
+                                {tab.count}
                             </span>
                         </button>
                     ))}
@@ -431,6 +448,112 @@ export default function PortfolioPage() {
                                 )}
                             </tbody>
                         </table>
+                    </div>
+                )}
+
+                {/* Analytics panel */}
+                {posTab === "analytics" && (
+                    <div className="p-5 space-y-5">
+                        {sellTrades.length === 0 ? (
+                            <div className="py-12 text-center">
+                                <Target className="w-8 h-8 mx-auto mb-3 text-muted-foreground/20" />
+                                <p className="text-sm text-muted-foreground mb-1">No closed trades yet</p>
+                                <p className="text-xs text-muted-foreground/60">Analytics appear after you complete your first sell</p>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Metric cards */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    {/* Win Rate */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Win Rate</span>
+                                            <Target className={cn("w-3.5 h-3.5", winRate >= 50 ? "text-up" : "text-down")} />
+                                        </div>
+                                        <p className={cn("text-2xl font-mono font-bold", winRate >= 50 ? "text-up" : "text-down")}>
+                                            {winRate.toFixed(1)}%
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">
+                                            {winTrades.length}W · {lossTrades.length}L · {sellTrades.length - winTrades.length - lossTrades.length} even
+                                        </p>
+                                    </div>
+
+                                    {/* Profit Factor */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Profit Factor</span>
+                                            <Flame className={cn("w-3.5 h-3.5", profitFactor >= 1 ? "text-up" : "text-down")} />
+                                        </div>
+                                        <p className={cn("text-2xl font-mono font-bold", profitFactor >= 1 ? "text-up" : "text-down")}>
+                                            {profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">gross profit / gross loss</p>
+                                    </div>
+
+                                    {/* Avg Win */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Avg Win</span>
+                                            <Award className="w-3.5 h-3.5 text-up" />
+                                        </div>
+                                        <p className="text-2xl font-mono font-bold text-up">
+                                            {winTrades.length > 0 ? `+${INR(avgWin, 0)}` : "—"}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">per winning trade</p>
+                                    </div>
+
+                                    {/* Avg Loss */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Avg Loss</span>
+                                            <ThumbsDown className="w-3.5 h-3.5 text-down" />
+                                        </div>
+                                        <p className="text-2xl font-mono font-bold text-down">
+                                            {lossTrades.length > 0 ? `-${INR(avgLoss, 0)}` : "—"}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground mt-1">per losing trade</p>
+                                    </div>
+                                </div>
+
+                                {/* Best / Worst trade */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {bestTrade && (
+                                        <div className="bg-[hsl(var(--up)/0.05)] border border-[hsl(var(--up)/0.2)] rounded-xl p-4 flex items-start justify-between">
+                                            <div>
+                                                <p className="text-[10px] font-semibold text-up uppercase tracking-wider mb-1">Best Trade</p>
+                                                <p className="text-sm font-bold text-foreground">{bestTrade.symbol.replace(".NS", "")}</p>
+                                                <p className="text-xs text-muted-foreground">{formatDate(bestTrade.filledAt)}</p>
+                                            </div>
+                                            <p className="text-lg font-mono font-bold text-up">+{INR(bestTrade.realizedPnl, 0)}</p>
+                                        </div>
+                                    )}
+                                    {worstTrade && (
+                                        <div className="bg-[hsl(var(--down)/0.05)] border border-[hsl(var(--down)/0.2)] rounded-xl p-4 flex items-start justify-between">
+                                            <div>
+                                                <p className="text-[10px] font-semibold text-down uppercase tracking-wider mb-1">Worst Trade</p>
+                                                <p className="text-sm font-bold text-foreground">{worstTrade.symbol.replace(".NS", "")}</p>
+                                                <p className="text-xs text-muted-foreground">{formatDate(worstTrade.filledAt)}</p>
+                                            </div>
+                                            <p className="text-lg font-mono font-bold text-down">{INR(worstTrade.realizedPnl, 0)}</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Totals row */}
+                                <div className="grid grid-cols-3 gap-3 text-center">
+                                    {[
+                                        { label: "Total Trades", value: trades.length.toString() },
+                                        { label: "Gross Profit", value: `+${INR(grossProfit, 0)}`, color: "text-up" },
+                                        { label: "Gross Loss",   value: `-${INR(grossLoss, 0)}`, color: "text-down" },
+                                    ].map((m) => (
+                                        <div key={m.label} className="bg-background border border-border rounded-xl py-3 px-2">
+                                            <p className={cn("text-lg font-mono font-bold", m.color ?? "text-foreground")}>{m.value}</p>
+                                            <p className="text-[10px] text-muted-foreground mt-0.5">{m.label}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
             </div>

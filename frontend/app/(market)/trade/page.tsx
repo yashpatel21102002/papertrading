@@ -17,41 +17,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import axios from "axios";
 import api from "@/lib/axios";
+import { SECTOR_MAP, SECTOR_COLOR, formatVolume, formatMarketCap } from "@/lib/sectors";
 
 const MARKET_URL = process.env.NEXT_PUBLIC_MARKET_URL || "http://localhost:8002";
-
-const SECTOR_MAP: Record<string, string> = {
-    "RELIANCE.NS": "Energy", "TCS.NS": "IT", "HDFCBANK.NS": "Banking",
-    "INFY.NS": "IT", "ICICIBANK.NS": "Banking", "HINDUNILVR.NS": "FMCG",
-    "ITC.NS": "FMCG", "SBIN.NS": "Banking", "BHARTIARTL.NS": "Telecom",
-    "KOTAKBANK.NS": "Banking", "LT.NS": "Industrials", "AXISBANK.NS": "Banking",
-    "ASIANPAINT.NS": "Paints", "MARUTI.NS": "Auto", "SUNPHARMA.NS": "Pharma",
-    "BAJFINANCE.NS": "Financial", "WIPRO.NS": "IT", "HCLTECH.NS": "IT",
-    "ULTRACEMCO.NS": "Cement", "TITAN.NS": "Consumer", "POWERGRID.NS": "Power",
-    "NTPC.NS": "Power", "ONGC.NS": "Energy", "BAJAJFINSV.NS": "Financial",
-    "TATAMOTORS.NS": "Auto", "DRREDDY.NS": "Pharma", "TECHM.NS": "IT",
-    "ADANIENT.NS": "Conglomerate", "NESTLEIND.NS": "FMCG", "GRASIM.NS": "Cement",
-    "TATASTEEL.NS": "Metals", "JSWSTEEL.NS": "Metals", "HINDALCO.NS": "Metals",
-    "COALINDIA.NS": "Mining", "BPCL.NS": "Energy", "INDUSINDBK.NS": "Banking",
-    "CIPLA.NS": "Pharma", "DIVISLAB.NS": "Pharma", "BRITANNIA.NS": "FMCG",
-    "BAJAJ-AUTO.NS": "Auto", "EICHERMOT.NS": "Auto", "HEROMOTOCO.NS": "Auto",
-    "APOLLOHOSP.NS": "Healthcare", "SBILIFE.NS": "Insurance", "HDFCLIFE.NS": "Insurance",
-    "TATACONSUM.NS": "FMCG", "UPL.NS": "Agri", "SHREECEM.NS": "Cement",
-    "MM.NS": "Auto", "ADANIPORTS.NS": "Logistics",
-};
-
-function formatVolume(v: number): string {
-    if (v >= 10_000_000) return `${(v / 10_000_000).toFixed(2)}Cr`;
-    if (v >= 100_000) return `${(v / 100_000).toFixed(2)}L`;
-    return v.toLocaleString("en-IN");
-}
-
-function formatMarketCap(v: number): string {
-    if (v >= 1_000_000_000_000) return `₹${(v / 1_000_000_000_000).toFixed(2)}T`;
-    if (v >= 10_000_000_000) return `₹${(v / 10_000_000_000).toFixed(2)}K Cr`;
-    if (v >= 10_000_000) return `₹${(v / 10_000_000).toFixed(2)} Cr`;
-    return `₹${v.toLocaleString("en-IN")}`;
-}
 
 const MARKET_STATE_LABEL: Record<string, { label: string; color: string }> = {
     REGULAR: { label: "Market Open", color: "text-up" },
@@ -346,7 +314,10 @@ function TradeContent() {
                         {SECTOR_MAP[symbolParam] && (
                             <div>
                                 <p className="text-muted-foreground mb-0.5 uppercase tracking-wider text-[10px] font-semibold">Sector</p>
-                                <span className="px-2 py-0.5 bg-accent/10 text-accent text-[10px] font-bold rounded-md">
+                                <span className={cn(
+                                    "px-2 py-0.5 text-[10px] font-bold rounded-md border",
+                                    SECTOR_COLOR[SECTOR_MAP[symbolParam]] ?? "bg-accent/10 text-accent border-accent/20",
+                                )}>
                                     {SECTOR_MAP[symbolParam]}
                                 </span>
                             </div>

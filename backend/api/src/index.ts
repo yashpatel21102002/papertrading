@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import authRouter from './routes/authRouter';
 import orderRouter from './routes/orderRouter';
 import portfolioRouter from './routes/portfolioRouter';
+import leaderboardRouter from './routes/leaderboardRouter';
 import { authenticate } from './middleware/auth';
 import { redisManager } from './utils/redisClient';
 import { connectProducer, disconnectProducer } from './kafka/orderProducer';
@@ -24,6 +25,7 @@ app.use(express.json());
 app.use('/api/auth', authRouter);
 app.use('/api/orders', authenticate, orderRouter);
 app.use('/api/portfolio', authenticate, portfolioRouter);
+app.use('/api/leaderboard', authenticate, leaderboardRouter);
 
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });

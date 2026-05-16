@@ -1,5 +1,5 @@
 "use client";
-import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut } from "lucide-react";
+import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut, Keyboard, Trophy } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -12,6 +12,7 @@ const navItems = [
   { label: "Trade", path: "/trade", icon: TrendingUp },
   { label: "Portfolio", path: "/portfolio", icon: Briefcase },
   { label: "Activity", path: "/activity", icon: Activity },
+  { label: "Leaderboard", path: "/leaderboard", icon: Trophy },
 ];
 
 function getAvatarInitial(): string {
@@ -92,6 +93,19 @@ export function TopNav() {
             <span className="text-muted-foreground">Balance</span>
             <span className="text-primary font-semibold">{formattedBalance}</span>
           </div>
+
+          {/* Shortcuts hint */}
+          <button
+            onClick={() => {
+              const e = new KeyboardEvent("keydown", { key: "?", bubbles: true });
+              window.dispatchEvent(e);
+            }}
+            className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Keyboard shortcuts"
+          >
+            <Keyboard className="w-3.5 h-3.5" />
+            <kbd className="text-[10px] font-mono bg-muted border border-border rounded px-1">?</kbd>
+          </button>
 
           {/* Notification bell */}
           <button
