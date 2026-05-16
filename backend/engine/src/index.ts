@@ -1,38 +1,50 @@
-import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
-import { fetchStockData } from './utils/yahoo';
-import { RedisClient } from './utils/redisClient';
-import orderRouter from './routes/ordersRouter';
-import marketRouter from './routes/marketRouter'
-
-const app = express();
 dotenv.config();
 
+import express from 'express';
+import cors from 'cors';
+import { fetchStockData } from './utils/yahoo';
+import { RedisClient } from './utils/redisClient';
+import logger from './utils/logger';
+import marketRouter from './routes/marketRouter';
+import { createTopics } from './kafka/admin';
+import { connectProducer, disconnectProducer } from './kafka/orderProducer';
+import { connectConsumer, disconnectConsumer } from './kafka/orderConsumer';
+
+const log = logger.child({ module: 'server' });
+
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use("/api/order", orderRouter);
 app.use("/api/market", marketRouter);
 
-app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT}`);
-})
+async function shutdown(signal: string) {
+    log.info({ signal }, 'Shutdown signal received, closing connections');
+    await disconnectConsumer();
+    await disconnectProducer();
+    await RedisClient.disconnect();
+    process.exit(0);
+}
 
-//fetching the stock data for the given symbols every 2 seconds (getting interval from env file)
-fetchStockData()
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-//removing the connection when the process is terminated
-process.on('SIGINT', () => {
-    RedisClient.disconnect();
-    process.exit();
+async function main() {
+    await RedisClient.connect();
+    await createTopics();
+    await connectProducer();
+    await connectConsumer();
+
+    app.listen(Number(PORT), '0.0.0.0', () => {
+        log.info({ port: PORT }, 'Engine server started');
+    });
+
+    fetchStockData();
+}
+
+main().catch((err) => {
+    log.fatal({ err }, 'Engine failed to start, exiting');
+    process.exit(1);
 });
-
-process.on('SIGTERM', () => {
-    RedisClient.disconnect();
-    process.exit();
-});
-
-
-
