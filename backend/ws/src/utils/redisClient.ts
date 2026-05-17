@@ -1,54 +1,47 @@
 import { createClient } from 'redis';
-import dotenv from 'dotenv';
+import logger from './logger';
 
-//loading the environment variables from the .env file
-dotenv.config();
+const log = logger.child({ module: 'redis' });
+
+const RECONNECT_MAX_RETRIES = 10;
+
+function reconnectStrategy(retries: number): number | Error {
+    if (retries > RECONNECT_MAX_RETRIES) {
+        return new Error('Redis max reconnection attempts exceeded');
+    }
+    return Math.min(retries * 200, 3000);
+}
 
 export class RedisClient {
     private static instance: RedisClient;
-    client: ReturnType<typeof createClient>;
-    publisher: ReturnType<typeof createClient>;
-    subscriber: ReturnType<typeof createClient>;
+
+    readonly subscriber: ReturnType<typeof createClient>;
 
     private constructor() {
         const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-        this.client = createClient({ url: redisUrl });
-        this.publisher = this.client.duplicate();
-        this.subscriber = this.client.duplicate();
+        const options = { url: redisUrl, socket: { reconnectStrategy } };
 
-        //connecting to the redis server
-        this.connect();
+        this.subscriber = createClient(options);
+
+        this.subscriber.on('error', (err) => log.error({ err }, 'Redis subscriber error'));
+        this.subscriber.on('reconnecting', () => log.warn('Redis subscriber reconnecting'));
     }
 
-    private connect() {
-        this.client.connect().then(() => {
-            console.log('Connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting to Redis:', err);
-        });
-        this.publisher.connect().then(() => {
-            console.log('Publisher connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting publisher to Redis:', err);
-        });
-        this.subscriber.connect().then(() => {
-            console.log('Subscriber connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting subscriber to Redis:', err);
-        });
-    }
-
-    public static getclient() {
+    public static getclient(): RedisClient {
         if (!RedisClient.instance) {
             RedisClient.instance = new RedisClient();
         }
-        return RedisClient.instance
+        return RedisClient.instance;
     }
 
-    public static async disconnect() {
+    public static async connect(): Promise<void> {
+        const instance = RedisClient.getclient();
+        await instance.subscriber.connect();
+        log.info('Redis subscriber connected');
+    }
+
+    public static async disconnect(): Promise<void> {
         if (RedisClient.instance) {
-            await RedisClient.instance.client.quit();
-            await RedisClient.instance.publisher.quit();
             await RedisClient.instance.subscriber.quit();
             RedisClient.instance = undefined as any;
         }

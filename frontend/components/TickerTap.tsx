@@ -12,16 +12,14 @@ const TickerTrack = React.memo(({ stocks }: { stocks: StockQuote[] }) => {
           key={`${stock.symbol}-${i}`}
           className="flex items-center gap-2 text-[11px] font-mono shrink-0"
         >
-          <span className="font-bold text-foreground">{stock.symbol}</span>
+          <span className="font-bold text-foreground">{stock.symbol.replace(".NS", "")}</span>
           <span className="text-muted-foreground">
             ₹
             {stock.regularMarketPrice.toLocaleString("en-IN", {
               minimumFractionDigits: 2,
             })}
           </span>
-          <span
-            className={`text-[10px] ${stock.regularMarketChange >= 0 ? "text-green-500" : "text-red-500"}`}
-          >
+          <span className={`text-[10px] ${stock.regularMarketChange >= 0 ? "text-up" : "text-down"}`}>
             {stock.regularMarketChange >= 0 ? "▲" : "▼"}
             {Math.abs(stock.regularMarketChangePercent).toFixed(2)}%
           </span>

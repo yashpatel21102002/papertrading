@@ -1,56 +1,73 @@
 import { createClient } from 'redis';
-import dotenv from 'dotenv';
+import logger from './logger';
 
-//loading the environment variables from the .env file
-dotenv.config();
+const log = logger.child({ module: 'redis' });
+
+const RECONNECT_MAX_RETRIES = 10;
+
+function reconnectStrategy(retries: number): number | Error {
+    if (retries > RECONNECT_MAX_RETRIES) {
+        log.error({ retries }, 'Redis max reconnection attempts exceeded');
+        return new Error('Redis max reconnection attempts exceeded');
+    }
+    const delayMs = Math.min(retries * 200, 3000);
+    log.warn({ retries, delayMs }, 'Redis reconnecting');
+    return delayMs;
+}
 
 export class RedisClient {
     private static instance: RedisClient;
-    client: ReturnType<typeof createClient>;
-    publisher: ReturnType<typeof createClient>;
-    subscriber: ReturnType<typeof createClient>;
+
+    readonly client: ReturnType<typeof createClient>;
+    readonly publisher: ReturnType<typeof createClient>;
+    readonly subscriber: ReturnType<typeof createClient>;
 
     private constructor() {
         const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-        this.client = createClient({ url: redisUrl });
+        const options = { url: redisUrl, socket: { reconnectStrategy } };
+
+        this.client = createClient(options);
         this.publisher = this.client.duplicate();
         this.subscriber = this.client.duplicate();
 
-        //connecting to the redis server
-        this.connect();
+        // Error handlers are mandatory — without them an emitted 'error' event
+        // with no listener crashes the Node process immediately.
+        this.client.on('error', (err) => log.error({ err }, 'Redis client error'));
+        this.client.on('reconnecting', () => log.warn('Redis client reconnecting'));
+
+        this.publisher.on('error', (err) => log.error({ err }, 'Redis publisher error'));
+        this.publisher.on('reconnecting', () => log.warn('Redis publisher reconnecting'));
+
+        this.subscriber.on('error', (err) => log.error({ err }, 'Redis subscriber error'));
+        this.subscriber.on('reconnecting', () => log.warn('Redis subscriber reconnecting'));
     }
 
-    private connect() {
-        this.client.connect().then(() => {
-            console.log('Connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting to Redis:', err);
-        });
-        this.publisher.connect().then(() => {
-            console.log('Publisher connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting publisher to Redis:', err);
-        });
-        this.subscriber.connect().then(() => {
-            console.log('Subscriber connected to Redis');
-        }).catch((err) => {
-            console.error('Error connecting subscriber to Redis:', err);
-        });
-    }
-
-    public static getclient() {
+    public static getclient(): RedisClient {
         if (!RedisClient.instance) {
             RedisClient.instance = new RedisClient();
         }
-        return RedisClient.instance
+        return RedisClient.instance;
     }
 
-    public static async disconnect() {
-        if (RedisClient.instance) {
-            await RedisClient.instance.client.quit();
-            await RedisClient.instance.publisher.quit();
-            await RedisClient.instance.subscriber.quit();
-            RedisClient.instance = undefined as any;
-        }
+    // Must be called once at startup and awaited before the server begins serving.
+    public static async connect(): Promise<void> {
+        const instance = RedisClient.getclient();
+        await Promise.all([
+            instance.client.connect(),
+            instance.publisher.connect(),
+            instance.subscriber.connect(),
+        ]);
+        log.info('All Redis connections established');
+    }
+
+    public static async disconnect(): Promise<void> {
+        if (!RedisClient.instance) return;
+        await Promise.all([
+            RedisClient.instance.client.quit(),
+            RedisClient.instance.publisher.quit(),
+            RedisClient.instance.subscriber.quit(),
+        ]);
+        log.info('All Redis connections closed');
+        RedisClient.instance = undefined as any;
     }
 }

@@ -10,8 +10,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
-import axios, { AxiosError } from "axios";
-import Error from "next/error";
+import axios from "axios";
 
 export default function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -82,9 +81,9 @@ export default function AuthPage() {
         }
       }
     } catch (error) {
-      // Improved error handling to show backend message if available
       toast("Error occurred", {
         description:
+          error.response?.data?.error ||
           error.response?.data?.message ||
           "Something went wrong. Please check your connection.",
       });

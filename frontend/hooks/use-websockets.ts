@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const WS_URL = process.env.NEXT_PUBLIC_MARKET_WS_URL || "ws://localhost:8003";
+const WS_BASE_URL = process.env.NEXT_PUBLIC_MARKET_WS_URL || "ws://localhost:8003";
 
 interface WSTickData {
     symbol: string;
@@ -11,6 +11,19 @@ interface WSTickData {
     regularMarketChangePercent: number;
     regularMarketTime: string;
     shortName: string;
+}
+
+function getCookie(name: string): string | null {
+    if (typeof document === "undefined") return null;
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop()?.split(";").shift() ?? null;
+    return null;
+}
+
+function buildWsUrl(): string {
+    const token = getCookie("auth_token");
+    return token ? `${WS_BASE_URL}?token=${token}` : WS_BASE_URL;
 }
 
 export function useWebSocket(tickers: string[]) {
@@ -28,7 +41,8 @@ export function useWebSocket(tickers: string[]) {
 
         setTimeout(() => setStatus("connecting"), 0);
 
-        const ws = new WebSocket(WS_URL);
+        // Append JWT token so the server can authenticate the upgrade request.
+        const ws = new WebSocket(buildWsUrl());
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -77,9 +91,8 @@ export function useWebSocket(tickers: string[]) {
         return () => {
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
             if (wsRef.current) {
-                // CLEANUP: Unsubscribe from everything before closing
-                subscribedRef.current.forEach(topic => {
-                    wsRef.current?.send(JSON.stringify({ type: "UNSUBSCRIBE", ticker: topic }));
+                subscribedRef.current.forEach(ticker => {
+                    wsRef.current?.send(JSON.stringify({ type: "UNSUBSCRIBE", ticker }));
                 });
                 wsRef.current.onclose = null;
                 wsRef.current.close();
@@ -88,24 +101,24 @@ export function useWebSocket(tickers: string[]) {
         };
     }, [connect]);
 
-    // Subscription Management with Cleanup
+    // Subscription Management — send raw symbol; server adds the `stock:` prefix.
     useEffect(() => {
         if (status === "connected" && wsRef.current?.readyState === WebSocket.OPEN) {
-            const currentTopics = new Set(tickers.map(t => `stock:${t}`));
+            const currentTickers = new Set(tickers);
 
-            // 1. Unsubscribe from topics no longer in the tickers array
-            subscribedRef.current.forEach(topic => {
-                if (!currentTopics.has(topic)) {
-                    wsRef.current?.send(JSON.stringify({ type: "UNSUBSCRIBE", ticker: topic }));
-                    subscribedRef.current.delete(topic);
+            // Unsubscribe from tickers no longer needed
+            subscribedRef.current.forEach(ticker => {
+                if (!currentTickers.has(ticker)) {
+                    wsRef.current?.send(JSON.stringify({ type: "UNSUBSCRIBE", ticker }));
+                    subscribedRef.current.delete(ticker);
                 }
             });
 
-            // 2. Subscribe to new topics
-            currentTopics.forEach(topic => {
-                if (!subscribedRef.current.has(topic)) {
-                    wsRef.current?.send(JSON.stringify({ type: "SUBSCRIBE", ticker: topic }));
-                    subscribedRef.current.add(topic);
+            // Subscribe to new tickers
+            currentTickers.forEach(ticker => {
+                if (!subscribedRef.current.has(ticker)) {
+                    wsRef.current?.send(JSON.stringify({ type: "SUBSCRIBE", ticker }));
+                    subscribedRef.current.add(ticker);
                 }
             });
         }

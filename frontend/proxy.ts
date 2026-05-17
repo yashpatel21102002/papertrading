@@ -6,8 +6,6 @@ export default function proxy(req: NextRequest) {
     const token = req.cookies.get('auth_token')?.value;
     const { pathname } = req.nextUrl;
 
-    console.log('Middleware triggered for path:', pathname, '| Token found:', !!token);
-
     const isAuthPage = pathname === '/auth';
     const DASHBOARD = '/';
 

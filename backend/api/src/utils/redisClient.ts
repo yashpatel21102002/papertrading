@@ -1,4 +1,19 @@
 import { createClient, RedisClientType } from 'redis';
+import logger from './logger';
+
+const log = logger.child({ module: 'redis' });
+
+const RECONNECT_MAX_RETRIES = 10;
+
+function reconnectStrategy(retries: number): number | Error {
+    if (retries > RECONNECT_MAX_RETRIES) {
+        log.error({ retries }, 'Redis max reconnection attempts exceeded');
+        return new Error('Redis max reconnection attempts exceeded');
+    }
+    const delayMs = Math.min(retries * 200, 3000);
+    log.warn({ retries, delayMs }, 'Redis reconnecting');
+    return delayMs;
+}
 
 class RedisManager {
     private static instance: RedisManager;
@@ -8,19 +23,20 @@ class RedisManager {
 
     private constructor() {
         const url = process.env.REDIS_URL || 'redis://localhost:6379';
+        const options = { url, socket: { reconnectStrategy } };
 
-        // Initialize three distinct clients for different roles
-        this.client = createClient({ url });
-        this.publisher = createClient({ url });
-        this.subscriber = createClient({ url });
+        this.client = createClient(options) as RedisClientType;
+        this.publisher = createClient(options) as RedisClientType;
+        this.subscriber = createClient(options) as RedisClientType;
 
-        this.setupErrorHandlers();
-    }
+        this.client.on('error', (err) => log.error({ err }, 'Redis client error'));
+        this.client.on('reconnecting', () => log.warn('Redis client reconnecting'));
 
-    private setupErrorHandlers() {
-        [this.client, this.publisher, this.subscriber].forEach((c, i) => {
-            c.on('error', (err) => console.error(`Redis Client ${i} Error:`, err));
-        });
+        this.publisher.on('error', (err) => log.error({ err }, 'Redis publisher error'));
+        this.publisher.on('reconnecting', () => log.warn('Redis publisher reconnecting'));
+
+        this.subscriber.on('error', (err) => log.error({ err }, 'Redis subscriber error'));
+        this.subscriber.on('reconnecting', () => log.warn('Redis subscriber reconnecting'));
     }
 
     public static getInstance(): RedisManager {
@@ -30,31 +46,26 @@ class RedisManager {
         return RedisManager.instance;
     }
 
-    // Modern 'redis' library requires manual connection
-    public async connect() {
-        try {
-            await Promise.all([
-                this.client.connect(),
-                this.publisher.connect(),
-                this.subscriber.connect()
-            ]);
-            console.log('🚀 Redis Clients Connected Successfully');
-        } catch (err) {
-            console.error('❌ Failed to connect to Redis:', err);
-        }
+    public async connect(): Promise<void> {
+        await Promise.all([
+            this.client.connect(),
+            this.publisher.connect(),
+            this.subscriber.connect(),
+        ]);
+        log.info('All Redis connections established');
     }
 
-    // Getters for specific instances
     public getClient() { return this.client; }
     public getPublisher() { return this.publisher; }
     public getSubscriber() { return this.subscriber; }
 
-    public async disconnect() {
+    public async disconnect(): Promise<void> {
         await Promise.all([
             this.client.quit(),
             this.publisher.quit(),
-            this.subscriber.quit()
+            this.subscriber.quit(),
         ]);
+        log.info('All Redis connections closed');
     }
 }
 

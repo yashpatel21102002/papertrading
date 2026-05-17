@@ -14,6 +14,8 @@ model User {
   lockedBalance Float     @default(0) // Cash in open BUY orders
   holdings      Holding[]
   orders        Order[]
+  trades        Trade[]
+  snapshots     EquitySnapshot[]
 }
 
 model Holding {
@@ -34,11 +36,40 @@ model Order {
   symbol      String
   quantity    Int
   price       Float
-  side        String // "buy" | "sell"
-  status      String // "open" | "filled" | "cancelled"
-  type        String // "market" | "limit"
+  side        String   // "buy" | "sell"
+  status      String   // "open" | "filled" | "cancelled"
+  type        String   // "market" | "limit"
   createdAt   DateTime @default(now())
   lockedValue Float    @default(0) // For BUY: quantity * price, for SELL: quantity * averagePrice
   updatedAt   DateTime @updatedAt
+  note        String?  // trader's journal note — why they placed this trade
+  tags        String[] @default([]) // strategy tags e.g. ["Momentum", "Breakout"]
   user        User     @relation(fields: [userId], references: [id])
+  trade       Trade?
+}
+
+model Trade {
+  id             String   @id @default(uuid())
+  userId         String
+  orderId        String   @unique
+  symbol         String
+  side           String   // "buy" | "sell"
+  quantity       Int
+  executionPrice Float
+  avgCostBasis   Float    // holding avgPrice at time of fill (executionPrice for buys)
+  realizedPnl    Float    @default(0) // 0 for buys; (executionPrice - avgCostBasis) * qty for sells
+  filledAt       DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
+  order          Order    @relation(fields: [orderId], references: [id])
+}
+
+model EquitySnapshot {
+  id      String   @id @default(uuid())
+  userId  String
+  value   Float    // total portfolio value at snapshot time
+  date    String   // "YYYY-MM-DD" — one record per user per day (upserted)
+  takenAt DateTime @default(now())
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
 }

@@ -1,57 +1,42 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import api from '@/lib/axios';
+import { useQuery } from "@tanstack/react-query";
+import api from "@/lib/axios";
+
+export interface Order {
+    id: string;
+    symbol: string;
+    side: "buy" | "sell";
+    type: "limit" | "market";
+    price: number;
+    quantity: number;
+    status: "open" | "pending" | "filled" | "cancelled";
+    createdAt: string;
+}
+
+async function fetchOrders(): Promise<Order[]> {
+    const response = await api.get<{ orders: Order[]; total: number }>("/api/orders/get");
+    return response.data.orders ?? [];
+}
 
 export default function useGetOrders() {
-    const [orders, setOrders] = useState([]);
-    const [error, setError] = useState<string | null>(null);
-    const [openOrders, setOpenOrders] = useState([]);
-    const [orderHistory, setOrderHistory] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const query = useQuery({
+        queryKey: ["orders"],
+        queryFn: fetchOrders,
+        refetchInterval: 3000,
+        staleTime: 2000,
+    });
 
-    // Memoized fetch function so it can be called manually (mutate) or via interval
-    const fetchOrders = useCallback(async () => {
-        try {
-            const response = await api.get("/api/orders/get");
-            const data = response.data;
-
-            setOrders(data);
-
-            // Filter logic matching your backend status strings
-            setOpenOrders(data.filter((order) => order.status === "open"));
-            setOrderHistory(data.filter((order) =>
-                order.status === "filled" || order.status === "cancelled"
-            ));
-
-            setError(null);
-        } catch (err) {
-            setError(err.response?.data?.error || "Failed to fetch orders");
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        // Initial fetch
-        fetchOrders();
-
-        // Long Polling: Check for updates every 3 seconds
-        // This ensures the UI reflects when an order is filled by the matching engine
-        const interval = setInterval(() => {
-            fetchOrders();
-        }, 3000);
-
-        // Cleanup interval on component unmount
-        return () => clearInterval(interval);
-    }, [fetchOrders]);
+    const orders = query.data ?? [];
+    const openOrders = orders.filter((o) => o.status === "open" || o.status === "pending");
+    const orderHistory = orders.filter((o) => o.status === "filled" || o.status === "cancelled");
 
     return {
         orders,
-        error,
         openOrders,
         orderHistory,
-        isLoading,
-        mutate: fetchOrders // Export this to allow manual refresh after order creation
+        isLoading: query.isLoading,
+        error: query.error ? (query.error as Error).message : null,
+        mutate: () => query.refetch(),
     };
 }
