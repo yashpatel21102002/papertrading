@@ -36,12 +36,14 @@ model Order {
   symbol      String
   quantity    Int
   price       Float
-  side        String // "buy" | "sell"
-  status      String // "open" | "filled" | "cancelled"
-  type        String // "market" | "limit"
+  side        String   // "buy" | "sell"
+  status      String   // "open" | "filled" | "cancelled"
+  type        String   // "market" | "limit"
   createdAt   DateTime @default(now())
   lockedValue Float    @default(0) // For BUY: quantity * price, for SELL: quantity * averagePrice
   updatedAt   DateTime @updatedAt
+  note        String?  // trader's journal note — why they placed this trade
+  tags        String[] @default([]) // strategy tags e.g. ["Momentum", "Breakout"]
   user        User     @relation(fields: [userId], references: [id])
   trade       Trade?
 }

@@ -39,6 +39,7 @@ class MarketManager {
     }
 
     public isMarketOpen(symbol: string): boolean {
+        if (process.env.PAPER_EXTENDED_HOURS === 'true') return true;
         const data = this.marketData.get(symbol);
         return data?.marketState === 'REGULAR';
     }

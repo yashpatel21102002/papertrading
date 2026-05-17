@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
-import { Settings, LogOut, Download, RotateCcw, AlertTriangle, Eye, EyeOff, Loader2, Lock, Mail, FileJson } from "lucide-react";
+import { Settings, LogOut, Download, RotateCcw, AlertTriangle, Eye, EyeOff, Loader2, Lock, Mail, FileJson, FileSpreadsheet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/axios";
@@ -80,6 +80,38 @@ export default function SettingsPage() {
       toast.success("Exported", { description: "Portfolio data downloaded as JSON" });
     },
     onError: () => toast.error("Export failed", { description: "Could not export data" }),
+  });
+
+  const exportCsvMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.get("/api/portfolio/trades");
+      return res.data.trades as Array<Record<string, any>>;
+    },
+    onSuccess: (trades) => {
+      if (trades.length === 0) { toast.info("No trades to export"); return; }
+      const headers = ["Date", "Symbol", "Side", "Quantity", "Execution Price", "Avg Cost Basis", "Realized P&L", "Note", "Tags"];
+      const rows = trades.map((t: any) => [
+        new Date(t.filledAt).toLocaleString("en-IN"),
+        t.symbol,
+        t.side,
+        t.quantity,
+        t.executionPrice.toFixed(2),
+        t.avgCostBasis.toFixed(2),
+        t.realizedPnl.toFixed(2),
+        t.order?.note ?? "",
+        (t.order?.tags ?? []).join("; "),
+      ]);
+      const csv = [headers, ...rows].map((r) => r.map((v: any) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `trades-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Exported", { description: `${trades.length} trades downloaded as CSV` });
+    },
+    onError: () => toast.error("Export failed"),
   });
 
   const handleLogout = () => {
@@ -204,7 +236,7 @@ export default function SettingsPage() {
       <div className="bg-card border border-border rounded-xl p-6 space-y-4">
         <p className="text-sm font-semibold text-foreground uppercase tracking-widest mb-4">Data</p>
 
-        {/* Export */}
+        {/* Export JSON */}
         <button
           onClick={() => exportMutation.mutate()}
           disabled={exportMutation.isPending}
@@ -213,11 +245,27 @@ export default function SettingsPage() {
           <div className="flex items-center gap-3 text-left">
             <FileJson className="w-4 h-4 text-muted-foreground" />
             <div>
-              <p className="text-sm font-medium text-foreground">Export Data</p>
+              <p className="text-sm font-medium text-foreground">Export Data (JSON)</p>
               <p className="text-[10px] text-muted-foreground">Download portfolio, trades &amp; orders as JSON</p>
             </div>
           </div>
           <Download className={cn("w-4 h-4 text-muted-foreground", exportMutation.isPending && "animate-pulse")} />
+        </button>
+
+        {/* Export CSV */}
+        <button
+          onClick={() => exportCsvMutation.mutate()}
+          disabled={exportCsvMutation.isPending}
+          className="w-full flex items-center justify-between px-4 py-3 bg-muted/50 hover:bg-muted border border-border rounded-lg transition-colors disabled:opacity-50"
+        >
+          <div className="flex items-center gap-3 text-left">
+            <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium text-foreground">Export Trades (CSV)</p>
+              <p className="text-[10px] text-muted-foreground">Download trade history with journal notes as CSV</p>
+            </div>
+          </div>
+          <Download className={cn("w-4 h-4 text-muted-foreground", exportCsvMutation.isPending && "animate-pulse")} />
         </button>
 
         {/* Reset */}

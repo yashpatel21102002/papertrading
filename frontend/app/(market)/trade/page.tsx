@@ -7,13 +7,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { nifty50Stocks } from "@/lib/mock-data";
 import {
     ArrowUpRight, ArrowDownRight, BarChart2, Clock, History,
-    Trash2, AlertCircle, Loader2, TrendingUp, Wifi, WifiOff, X,
+    Trash2, AlertCircle, Loader2, TrendingUp, Wifi, WifiOff, X, Bell, Star,
 } from "lucide-react";
 import StockChart from "@/components/StockChart";
 import useGetOrders from "@/hooks/use-getOrders";
 import useGetPortfolio from "@/hooks/use-getPortfolio";
 import { useWebSocket } from "@/hooks/use-websockets";
 import { useActivity } from "@/context/activity-context";
+import { useWatchlist } from "@/hooks/use-watchlist";
+import { usePriceAlerts } from "@/hooks/use-price-alerts";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import axios from "axios";
@@ -61,6 +63,11 @@ function TradeContent() {
     const symbolParam = searchParams.get("symbol") || "RELIANCE.NS";
     const queryClient = useQueryClient();
     const { addEvent } = useActivity();
+    const { isWatched, toggle: toggleWatch } = useWatchlist();
+    const { addAlert, alerts } = usePriceAlerts();
+    const [showAlertModal, setShowAlertModal] = useState(false);
+    const [alertDirection, setAlertDirection] = useState<"above" | "below">("above");
+    const [alertPrice, setAlertPrice] = useState("");
 
     const tickers = useMemo(() => [symbolParam], [symbolParam]);
     const { tickData, flashMap, status: wsStatus } = useWebSocket(tickers);
@@ -86,6 +93,10 @@ function TradeContent() {
     const [quantity, setQuantity] = useState("10");
     const [bottomTab, setBottomTab] = useState<"open" | "history">("open");
     const [showConfirm, setShowConfirm] = useState(false);
+    const [journalNote, setJournalNote] = useState("");
+    const [journalTags, setJournalTags] = useState<string[]>([]);
+
+    const STRATEGY_TAGS = ["Momentum", "Breakout", "Dip Buy", "Swing", "Earnings", "Technical", "Fundamental", "Scalp", "FOMO", "Hedge"] as const;
 
     const prevOrdersRef = useRef<Order[]>([]);
 
@@ -169,7 +180,7 @@ function TradeContent() {
     }, [price, quantity, orderType, livePrice]);
 
     const placeMutation = useMutation({
-        mutationFn: (payload: { symbol: string; quantity: number; price: number; side: string; type: string }) =>
+        mutationFn: (payload: { symbol: string; quantity: number; price: number; side: string; type: string; note?: string; tags?: string[] }) =>
             api.post("/api/orders/create", payload),
         onSuccess: (_, vars) => {
             toast.success("Order placed", { description: `${vars.side.toUpperCase()} ${vars.quantity} × ${vars.symbol}` });
@@ -204,13 +215,19 @@ function TradeContent() {
     const handleConfirmOrder = () => {
         const qty = parseInt(quantity);
         const px = parseFloat(price);
+        const note = journalNote.trim() || undefined;
+        const tags = journalTags.length > 0 ? journalTags : undefined;
         setShowConfirm(false);
+        setJournalNote("");
+        setJournalTags([]);
         placeMutation.mutate({
             symbol: symbolParam,
             quantity: qty,
             price: orderType === "Market" ? 0 : px,
             side: side.toLowerCase(),
             type: orderType.toLowerCase(),
+            note,
+            tags,
         });
     };
 
@@ -244,6 +261,33 @@ function TradeContent() {
                                 </span>
                             </div>
                             <p className="text-xs text-muted-foreground">{stockName}</p>
+                        </div>
+                        {/* Watch + Alert buttons */}
+                        <div className="flex items-center gap-1 ml-1">
+                            <button
+                                onClick={() => toggleWatch(symbolParam)}
+                                title={isWatched(symbolParam) ? "Remove from watchlist" : "Add to watchlist"}
+                                className={cn(
+                                    "p-1.5 rounded-md transition-all",
+                                    isWatched(symbolParam)
+                                        ? "text-amber-400 bg-amber-400/10"
+                                        : "text-muted-foreground hover:text-amber-400 hover:bg-muted",
+                                )}
+                            >
+                                <Star className={cn("w-4 h-4", isWatched(symbolParam) && "fill-amber-400")} />
+                            </button>
+                            <button
+                                onClick={() => { setAlertPrice(livePrice.toFixed(2)); setShowAlertModal(true); }}
+                                title="Set price alert"
+                                className={cn(
+                                    "p-1.5 rounded-md transition-all",
+                                    alerts.some((a) => a.symbol === symbolParam && !a.triggered)
+                                        ? "text-primary bg-primary/10"
+                                        : "text-muted-foreground hover:text-primary hover:bg-muted",
+                                )}
+                            >
+                                <Bell className="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
 
@@ -621,6 +665,70 @@ function TradeContent() {
                 </div>
             </div>
 
+            {/* ── Set Alert modal ── */}
+            {showAlertModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+                        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                            <div>
+                                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Price Alert</p>
+                                <p className="text-lg font-bold">{symbolParam.replace(".NS", "")}</p>
+                            </div>
+                            <button onClick={() => setShowAlertModal(false)} className="text-muted-foreground hover:text-foreground p-1.5 rounded-md hover:bg-muted transition-colors">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="px-6 py-5 space-y-4">
+                            <div className="grid grid-cols-2 gap-2">
+                                {(["above", "below"] as const).map((d) => (
+                                    <button
+                                        key={d}
+                                        onClick={() => setAlertDirection(d)}
+                                        className={cn(
+                                            "py-2.5 text-sm font-semibold rounded-lg border transition-all capitalize",
+                                            alertDirection === d
+                                                ? d === "above"
+                                                    ? "bg-[hsl(var(--up)/0.15)] border-[hsl(var(--up)/0.4)] text-up"
+                                                    : "bg-[hsl(var(--down)/0.15)] border-[hsl(var(--down)/0.4)] text-down"
+                                                : "bg-muted border-border text-muted-foreground hover:text-foreground",
+                                        )}
+                                    >
+                                        {d === "above" ? "↑ Above" : "↓ Below"}
+                                    </button>
+                                ))}
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1.5">Target Price (₹)</label>
+                                <input
+                                    type="number"
+                                    value={alertPrice}
+                                    onChange={(e) => setAlertPrice(e.target.value)}
+                                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 font-mono text-sm focus:ring-1 focus:ring-primary outline-none transition-colors"
+                                />
+                                <p className="text-[10px] text-muted-foreground mt-1">Current price: ₹{livePrice.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</p>
+                            </div>
+                        </div>
+                        <div className="px-6 pb-5 grid grid-cols-2 gap-3">
+                            <button onClick={() => setShowAlertModal(false)} className="py-3 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const p = parseFloat(alertPrice);
+                                    if (isNaN(p) || p <= 0) { toast.error("Enter a valid price"); return; }
+                                    addAlert(symbolParam, stockName, alertDirection, p);
+                                    toast.success("Alert set!", { description: `Notify when ${symbolParam.replace(".NS", "")} goes ${alertDirection} ₹${p.toLocaleString("en-IN")}` });
+                                    setShowAlertModal(false);
+                                }}
+                                className="py-3 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:brightness-110 transition-all"
+                            >
+                                Set Alert
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Confirmation modal ── */}
             {showConfirm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -668,10 +776,51 @@ function TradeContent() {
                             </div>
                         </div>
 
+                        {/* Journal entry */}
+                        <div className="px-6 pb-4 space-y-3">
+                            <div className="h-px bg-border" />
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block" />
+                                Journal Entry <span className="normal-case font-normal text-muted-foreground/60">(optional)</span>
+                            </p>
+                            {/* Strategy tags */}
+                            <div className="flex flex-wrap gap-1.5">
+                                {STRATEGY_TAGS.map((tag) => (
+                                    <button
+                                        key={tag}
+                                        type="button"
+                                        onClick={() => setJournalTags((prev) =>
+                                            prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                                        )}
+                                        className={cn(
+                                            "px-2.5 py-1 text-[10px] font-semibold rounded-full border transition-all",
+                                            journalTags.includes(tag)
+                                                ? "bg-primary/15 border-primary/50 text-primary"
+                                                : "bg-muted border-border text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                                        )}
+                                    >
+                                        {tag}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Note textarea */}
+                            <textarea
+                                value={journalNote}
+                                onChange={(e) => setJournalNote(e.target.value)}
+                                maxLength={500}
+                                rows={2}
+                                placeholder="Why are you placing this trade?"
+                                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 resize-none outline-none focus:ring-1 focus:ring-primary transition-colors"
+                            />
+                            {journalNote.length > 400 && (
+                                <p className="text-[10px] text-muted-foreground text-right">{500 - journalNote.length} chars left</p>
+                            )}
+                        </div>
+
                         {/* Actions */}
                         <div className="px-6 pb-5 grid grid-cols-2 gap-3">
                             <button
-                                onClick={() => setShowConfirm(false)}
+                                onClick={() => { setShowConfirm(false); setJournalNote(""); setJournalTags([]); }}
                                 className="py-3 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                             >
                                 Cancel

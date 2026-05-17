@@ -25,9 +25,14 @@ const VALID_SIDES = ['buy', 'sell'] as const;
 const VALID_TYPES = ['limit', 'market'] as const;
 const VALID_STATUSES = ['pending', 'open', 'filled', 'cancelled'] as const;
 
+const VALID_TAGS = [
+    'Momentum', 'Breakout', 'Dip Buy', 'Swing', 'Earnings',
+    'Technical', 'Fundamental', 'Scalp', 'FOMO', 'Hedge',
+] as const;
+
 // POST /api/orders/create
 router.post('/create', orderCreateLimiter, async (req: AuthRequest, res: Response) => {
-    const { symbol, quantity, price, side, type } = req.body;
+    const { symbol, quantity, price, side, type, note, tags } = req.body;
     const userId = req.user?.id!;
 
     if (!symbol || typeof symbol !== 'string') {
@@ -45,6 +50,12 @@ router.post('/create', orderCreateLimiter, async (req: AuthRequest, res: Respons
     if (type === 'limit' && (typeof price !== 'number' || price <= 0)) {
         return res.status(400).json({ error: 'price must be a positive number for limit orders' });
     }
+    if (note !== undefined && (typeof note !== 'string' || note.length > 500)) {
+        return res.status(400).json({ error: 'note must be a string under 500 characters' });
+    }
+    const cleanTags: string[] = Array.isArray(tags)
+        ? tags.filter((t: any) => VALID_TAGS.includes(t)).slice(0, 5)
+        : [];
 
     try {
         let lockPrice = price;
@@ -103,6 +114,8 @@ router.post('/create', orderCreateLimiter, async (req: AuthRequest, res: Respons
                     status: 'pending',
                     type,
                     lockedValue: side === 'buy' ? totalLockedValue : quantity,
+                    note: note?.trim() || null,
+                    tags: cleanTags,
                 },
             });
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -180,6 +193,42 @@ router.get('/get', async (req: AuthRequest, res: Response) => {
         res.json({ orders, total, page: skip / take + 1, limit: take });
     } catch (error) {
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// PATCH /api/orders/:id/note — update journal note + tags on any user order
+router.patch('/:id/note', async (req: AuthRequest, res: Response) => {
+    const orderId = String(req.params.id);
+    const userId = req.user?.id!;
+    const { note, tags } = req.body;
+
+    if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > 500)) {
+        return res.status(400).json({ error: 'note must be a string under 500 characters' });
+    }
+
+    try {
+        const order = await prisma.order.findUnique({ where: { id: orderId } });
+        if (!order || order.userId !== userId) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        const cleanTags: string[] = Array.isArray(tags)
+            ? tags.filter((t: any) => VALID_TAGS.includes(t)).slice(0, 5)
+            : order.tags;
+
+        const updated = await prisma.order.update({
+            where: { id: orderId },
+            data: {
+                note: note !== undefined ? (note === null ? null : note.trim() || null) : order.note,
+                tags: cleanTags,
+            },
+            select: { id: true, note: true, tags: true },
+        });
+
+        res.json(updated);
+    } catch (err) {
+        log.error({ err, orderId }, 'Note update failed');
+        res.status(500).json({ error: 'Failed to update note' });
     }
 });
 

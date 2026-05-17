@@ -1,22 +1,25 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { getUserKey } from "@/lib/user-storage";
 
 export type ActivityEventType =
     | "order_placed"
     | "order_filled"
     | "order_cancelled"
-    | "order_rejected";
+    | "order_rejected"
+    | "price_alert";
 
 export interface ActivityEvent {
     id: string;
     type: ActivityEventType;
     symbol: string;
-    side: "buy" | "sell";
+    side: "buy" | "sell" | "alert";
     qty: number;
     price?: number;
     timestamp: string;
     read: boolean;
+    meta?: string; // extra context e.g. "above ₹2,500"
 }
 
 interface ActivityContextValue {
@@ -28,15 +31,16 @@ interface ActivityContextValue {
 
 const ActivityContext = createContext<ActivityContextValue | null>(null);
 
-const STORAGE_KEY = "activity_events";
 const MAX_EVENTS = 200;
 
 export function ActivityProvider({ children }: { children: React.ReactNode }) {
+    const keyRef = useRef<string>("");
     const [events, setEvents] = useState<ActivityEvent[]>([]);
 
     useEffect(() => {
+        keyRef.current = getUserKey("activity_events");
         try {
-            const stored = localStorage.getItem(STORAGE_KEY);
+            const stored = localStorage.getItem(keyRef.current);
             if (stored) setEvents(JSON.parse(stored));
         } catch {
             /* ignore parse errors */
@@ -45,7 +49,7 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 
     const persist = useCallback((next: ActivityEvent[]) => {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            localStorage.setItem(keyRef.current, JSON.stringify(next));
         } catch {
             /* quota exceeded — skip */
         }

@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-
-const STORAGE_KEY = "watchlist_symbols";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getUserKey } from "@/lib/user-storage";
 
 export function useWatchlist() {
+    const keyRef = useRef<string>("");
     const [symbols, setSymbols] = useState<string[]>([]);
     const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
+        keyRef.current = getUserKey("watchlist_symbols");
         try {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(keyRef.current);
             if (saved) setSymbols(JSON.parse(saved));
         } catch { /* ignore */ }
         setHydrated(true);
@@ -21,7 +22,7 @@ export function useWatchlist() {
             const next = prev.includes(symbol)
                 ? prev.filter((s) => s !== symbol)
                 : [...prev, symbol];
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+            try { localStorage.setItem(keyRef.current, JSON.stringify(next)); } catch { /* ignore */ }
             return next;
         });
     }, []);

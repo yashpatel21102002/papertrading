@@ -3,19 +3,211 @@ export const dynamic = "force-dynamic";
 import {
     TrendingUp, TrendingDown, Wallet, BarChart3, ArrowUpRight, ArrowDownRight, DollarSign,
     RotateCcw, AlertTriangle, Loader2, X, Target, Flame, Award, ThumbsDown,
+    BookOpen, Tag, Pencil, Check, ChevronDown, ChevronUp,
 } from "lucide-react";
 import {
     PieChart, Pie, Cell, ResponsiveContainer,
     AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+    BarChart, Bar,
 } from "recharts";
 import useGetPortfolio from "@/hooks/use-getPortfolio";
-import useGetTrades from "@/hooks/use-getTrades";
+import useGetTrades, { Trade } from "@/hooks/use-getTrades";
+import { useMarketPolling } from "@/hooks/use-marketpolling";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/axios";
 import { toast } from "sonner";
+
+const STRATEGY_TAGS = ["Momentum", "Breakout", "Dip Buy", "Swing", "Earnings", "Technical", "Fundamental", "Scalp", "FOMO", "Hedge"] as const;
+
+const TAG_COLOR: Record<string, string> = {
+    "Momentum":    "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    "Breakout":    "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    "Dip Buy":     "bg-[hsl(var(--up)/0.12)] text-up border-[hsl(var(--up)/0.2)]",
+    "Swing":       "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    "Earnings":    "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+    "Technical":   "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+    "Fundamental": "bg-teal-500/10 text-teal-400 border-teal-500/20",
+    "Scalp":       "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    "FOMO":        "bg-[hsl(var(--down)/0.12)] text-down border-[hsl(var(--down)/0.2)]",
+    "Hedge":       "bg-muted text-muted-foreground border-border",
+};
+
+function JournalRow({ trade, onSaved }: { trade: Trade; onSaved: () => void }) {
+    const [editing, setEditing] = useState(false);
+    const [editNote, setEditNote] = useState(trade.order?.note ?? "");
+    const [editTags, setEditTags] = useState<string[]>(trade.order?.tags ?? []);
+    const [saving, setSaving] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    const hasNote = !!(trade.order?.note);
+    const hasTags = (trade.order?.tags?.length ?? 0) > 0;
+    const hasContent = hasNote || hasTags;
+
+    const save = useCallback(async () => {
+        setSaving(true);
+        try {
+            await api.patch(`/api/orders/${trade.orderId}/note`, {
+                note: editNote.trim() || null,
+                tags: editTags,
+            });
+            toast.success("Journal updated");
+            setEditing(false);
+            onSaved();
+        } catch (err: any) {
+            const msg = err?.response?.data?.error || "Failed to save note";
+            toast.error(msg);
+        } finally {
+            setSaving(false);
+        }
+    }, [editNote, editTags, trade.orderId, onSaved]);
+
+    const pnlPositive = trade.realizedPnl >= 0;
+    const INR = (v: number) => `₹${Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+    return (
+        <div className="border-b border-border/40 last:border-0">
+            {/* Main row */}
+            <div
+                className="flex items-start gap-3 px-5 py-4 hover:bg-muted/10 transition-colors cursor-pointer"
+                onClick={() => setExpanded((p) => !p)}
+            >
+                {/* Side indicator */}
+                <div className={cn(
+                    "mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black uppercase shrink-0",
+                    trade.side === "buy"
+                        ? "bg-[hsl(var(--up)/0.12)] text-up"
+                        : "bg-[hsl(var(--down)/0.12)] text-down",
+                )}>
+                    {trade.side === "buy" ? "B" : "S"}
+                </div>
+
+                {/* Trade info */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{trade.symbol.replace(".NS", "")}</span>
+                        <span className="text-xs text-muted-foreground font-mono">
+                            {trade.quantity} × ₹{trade.executionPrice.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                        </span>
+                        {hasTags && !expanded && (
+                            <div className="flex gap-1 flex-wrap">
+                                {(trade.order?.tags ?? []).slice(0, 2).map((tag) => (
+                                    <span key={tag} className={cn("px-1.5 py-0.5 text-[9px] font-bold rounded-full border", TAG_COLOR[tag] ?? "bg-muted text-muted-foreground border-border")}>
+                                        {tag}
+                                    </span>
+                                ))}
+                                {(trade.order?.tags?.length ?? 0) > 2 && (
+                                    <span className="text-[9px] text-muted-foreground">+{(trade.order?.tags?.length ?? 0) - 2}</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[11px] text-muted-foreground">
+                            {new Date(trade.filledAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </span>
+                        {trade.side === "sell" && (
+                            <span className={cn("text-[11px] font-semibold font-mono", pnlPositive ? "text-up" : "text-down")}>
+                                {pnlPositive ? "+" : ""}{pnlPositive ? INR(trade.realizedPnl) : `-${INR(trade.realizedPnl)}`}
+                            </span>
+                        )}
+                        {!hasContent && !expanded && (
+                            <span className="text-[10px] text-muted-foreground/50 italic">No note — click to add</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Expand toggle */}
+                <div className="text-muted-foreground mt-1 shrink-0">
+                    {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </div>
+            </div>
+
+            {/* Expanded detail / edit */}
+            {expanded && (
+                <div className="px-5 pb-4 space-y-3">
+                    {!editing ? (
+                        <>
+                            {hasTags && (
+                                <div className="flex gap-1.5 flex-wrap">
+                                    {(trade.order?.tags ?? []).map((tag) => (
+                                        <span key={tag} className={cn("px-2 py-0.5 text-[10px] font-semibold rounded-full border", TAG_COLOR[tag] ?? "bg-muted text-muted-foreground border-border")}>
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            {hasNote ? (
+                                <p className="text-sm text-foreground/80 bg-muted/30 rounded-lg px-3 py-2.5 leading-relaxed border border-border/50">
+                                    {trade.order?.note}
+                                </p>
+                            ) : (
+                                <p className="text-xs text-muted-foreground/50 italic">No journal note for this trade.</p>
+                            )}
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setEditNote(trade.order?.note ?? ""); setEditTags(trade.order?.tags ?? []); setEditing(true); }}
+                                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+                            >
+                                <Pencil className="w-3 h-3" />
+                                {hasContent ? "Edit note" : "Add note"}
+                            </button>
+                        </>
+                    ) : (
+                        <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
+                            {/* Tag selector */}
+                            <div className="flex flex-wrap gap-1.5">
+                                {STRATEGY_TAGS.map((tag) => (
+                                    <button
+                                        key={tag}
+                                        type="button"
+                                        onClick={() => setEditTags((prev) =>
+                                            prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                                        )}
+                                        className={cn(
+                                            "px-2 py-0.5 text-[10px] font-semibold rounded-full border transition-all",
+                                            editTags.includes(tag)
+                                                ? cn("border", TAG_COLOR[tag] ?? "bg-primary/10 text-primary border-primary/30")
+                                                : "bg-muted border-border text-muted-foreground hover:border-primary/30",
+                                        )}
+                                    >
+                                        {tag}
+                                    </button>
+                                ))}
+                            </div>
+                            <textarea
+                                value={editNote}
+                                onChange={(e) => setEditNote(e.target.value)}
+                                maxLength={500}
+                                rows={3}
+                                autoFocus
+                                placeholder="What was your thesis? What did you learn?"
+                                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 resize-none outline-none focus:ring-1 focus:ring-primary transition-colors"
+                            />
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={save}
+                                    disabled={saving}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:brightness-110 disabled:opacity-50 transition-all"
+                                >
+                                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                    Save
+                                </button>
+                                <button
+                                    onClick={() => setEditing(false)}
+                                    className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-all"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 
 const CHART_COLORS = [
     "#00d97e", "#3b82f6", "#a855f7", "#f59e0b", "#ff4560", "#06b6d4",
@@ -78,7 +270,9 @@ function CustomTooltip({ active, payload, label }: any) {
 export default function PortfolioPage() {
     const { portfolio: data, isLoading } = useGetPortfolio();
     const { trades, totalRealizedPnl, isLoading: tradesLoading } = useGetTrades();
-    const [posTab, setPosTab] = useState<"open" | "closed" | "analytics">("open");
+    const { marketData } = useMarketPolling();
+    const [posTab, setPosTab] = useState<"open" | "closed" | "analytics" | "journal">("open");
+    const [journalFilter, setJournalFilter] = useState<"all" | "buy" | "sell" | string>("all");
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [resetInput, setResetInput] = useState("");
     const queryClient = useQueryClient();
@@ -136,13 +330,35 @@ export default function PortfolioPage() {
         equityHistory = [],
     } = data;
 
+    // Build live-price lookup from 10s market poll
+    const livePrice: Record<string, number> = {};
+    Object.values(marketData).forEach((q) => { livePrice[q.symbol] = q.regularMarketPrice; });
+    const hasLivePrices = portfolioHoldings.length > 0 && portfolioHoldings.some((h) => livePrice[h.symbol] !== undefined);
+
+    const liveHoldingsValue = portfolioHoldings.reduce((sum, h) => {
+        const cp = livePrice[h.symbol] ?? h.currentPrice;
+        return sum + cp * h.qty;
+    }, 0);
+    const liveUnrealizedPnl = portfolioHoldings.reduce((sum, h) => {
+        const cp = livePrice[h.symbol] ?? h.currentPrice;
+        return sum + (cp - h.avgPrice) * h.qty;
+    }, 0);
+    const liveTotalPortfolioValue = buyingPower + liveHoldingsValue;
+    const liveOverallPnl = liveTotalPortfolioValue - 1_000_000;
+
+    // Use live values when available, otherwise fall back to API values
+    const displayHoldingsValue = hasLivePrices ? liveHoldingsValue : holdingsValue;
+    const displayUnrealizedPnl = hasLivePrices ? liveUnrealizedPnl : unrealizedPnl;
+    const displayTotalValue = hasLivePrices ? liveTotalPortfolioValue : totalPortfolioValue;
+    const displayOverallPnl = hasLivePrices ? liveOverallPnl : overallPnl;
+
     const pieData = portfolioHoldings.map((h) => ({
         name: h.symbol.replace(".NS", ""),
         value: parseFloat(h.allocation as any) || 0,
     }));
 
-    const pnlPositive = overallPnl >= 0;
-    const unrealPnlPositive = unrealizedPnl >= 0;
+    const pnlPositive = displayOverallPnl >= 0;
+    const unrealPnlPositive = displayUnrealizedPnl >= 0;
     const realizedPositive = totalRealizedPnl >= 0;
 
     // Closed positions: group sell trades by symbol, sum realized PnL
@@ -201,12 +417,132 @@ export default function PortfolioPage() {
     const sharpeRatio = computeSharpeRatio(equityHistory);
     const maxDrawdown = computeMaxDrawdown(equityHistory);
 
+    // P&L by day of week (sells only)
+    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const pnlByDay = DAYS.map((day, i) => ({
+        day,
+        pnl: sellTrades
+            .filter((t) => new Date(t.filledAt).getDay() === i)
+            .reduce((s, t) => s + t.realizedPnl, 0),
+        count: sellTrades.filter((t) => new Date(t.filledAt).getDay() === i).length,
+    }));
+
+    // Monthly P&L (last 6 months)
+    const pnlByMonth = (() => {
+        const map: Record<string, number> = {};
+        sellTrades.forEach((t) => {
+            const key = new Date(t.filledAt).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+            map[key] = (map[key] ?? 0) + t.realizedPnl;
+        });
+        const sorted = Object.entries(map).sort(([a], [b]) => {
+            const parse = (s: string) => new Date(s.replace(/(\w+) (\d+)/, "20$2-$1-01"));
+            return parse(a).getTime() - parse(b).getTime();
+        });
+        return sorted.slice(-6).map(([month, pnl]) => ({ month, pnl }));
+    })();
+
+    // Current trading streak (consecutive wins/losses from most recent sell)
+    const tradingStreak = (() => {
+        if (sellTrades.length === 0) return { count: 0, type: "none" as const };
+        const sorted = [...sellTrades].sort((a, b) => new Date(b.filledAt).getTime() - new Date(a.filledAt).getTime());
+        const firstType = sorted[0].realizedPnl > 0 ? "win" : sorted[0].realizedPnl < 0 ? "loss" : "even";
+        let streak = 1;
+        for (let i = 1; i < sorted.length; i++) {
+            const cur = sorted[i].realizedPnl > 0 ? "win" : sorted[i].realizedPnl < 0 ? "loss" : "even";
+            if (cur !== firstType) break;
+            streak++;
+        }
+        return { count: streak, type: firstType };
+    })();
+
+    // Top 5 traded symbols
+    const topSymbols = (() => {
+        const counts: Record<string, { count: number; pnl: number }> = {};
+        trades.forEach((t) => {
+            if (!counts[t.symbol]) counts[t.symbol] = { count: 0, pnl: 0 };
+            counts[t.symbol].count++;
+            if (t.side === "sell") counts[t.symbol].pnl += t.realizedPnl;
+        });
+        return Object.entries(counts)
+            .sort(([, a], [, b]) => b.count - a.count)
+            .slice(0, 5)
+            .map(([symbol, d]) => ({ symbol: symbol.replace(".NS", ""), count: d.count, pnl: d.pnl }));
+    })();
+
+    const ACHIEVEMENTS = [
+        {
+            id: "first_trade",
+            icon: "🎯",
+            title: "First Trade",
+            description: "Placed your first order",
+            unlocked: trades.length >= 1,
+        },
+        {
+            id: "first_win",
+            icon: "🏆",
+            title: "First Win",
+            description: "Closed a profitable trade",
+            unlocked: winTrades.length >= 1,
+        },
+        {
+            id: "explorer",
+            icon: "🌏",
+            title: "Market Explorer",
+            description: "Hold 3 different stocks simultaneously",
+            unlocked: portfolioHoldings.length >= 3,
+        },
+        {
+            id: "diversified",
+            icon: "📊",
+            title: "Diversified",
+            description: "Hold 5+ different positions at once",
+            unlocked: portfolioHoldings.length >= 5,
+        },
+        {
+            id: "win_rate",
+            icon: "🔥",
+            title: "50% Club",
+            description: "Achieve ≥50% win rate (min 5 closed trades)",
+            unlocked: sellTrades.length >= 5 && winRate >= 50,
+        },
+        {
+            id: "profit_factor",
+            icon: "⚡",
+            title: "Profit Factor Pro",
+            description: "Maintain profit factor ≥2 (min 5 closed trades)",
+            unlocked: sellTrades.length >= 5 && profitFactor >= 2,
+        },
+        {
+            id: "ten_percent",
+            icon: "🚀",
+            title: "10% Club",
+            description: "Grow your portfolio by 10% (₹1,00,000+)",
+            unlocked: overallPnl >= 100_000,
+        },
+        {
+            id: "active",
+            icon: "💼",
+            title: "Active Trader",
+            description: "Complete 25+ trades",
+            unlocked: trades.length >= 25,
+        },
+    ] as const;
+
+    const unlockedCount = ACHIEVEMENTS.filter((a) => a.unlocked).length;
+
     return (
         <div className="max-w-7xl mx-auto space-y-5">
             <div className="flex items-center justify-between">
                 <h1 className="text-xl font-semibold text-foreground">Portfolio</h1>
                 <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground font-mono hidden sm:inline">Updated every 30s</span>
+                    {hasLivePrices ? (
+                        <span className="flex items-center gap-1.5 text-xs font-mono text-up hidden sm:flex">
+                            <span className="w-1.5 h-1.5 rounded-full bg-up animate-pulse" />
+                            Live prices
+                        </span>
+                    ) : (
+                        <span className="text-xs text-muted-foreground font-mono hidden sm:inline">Updated every 30s</span>
+                    )}
                     <button
                         onClick={() => { setResetInput(""); setShowResetConfirm(true); }}
                         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-down border border-border hover:border-down/40 rounded-lg px-3 py-1.5 transition-all"
@@ -221,8 +557,8 @@ export default function PortfolioPage() {
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <StatCard
                     label="Total Portfolio Value"
-                    value={INR(totalPortfolioValue, 0)}
-                    sub={`${pnlPositive ? "+" : ""}${INR(overallPnl, 0)} overall`}
+                    value={INR(displayTotalValue, 0)}
+                    sub={`${pnlPositive ? "+" : ""}${INR(displayOverallPnl, 0)} overall`}
                     positive={pnlPositive}
                     icon={pnlPositive ? TrendingUp : TrendingDown}
                     accentClass={pnlPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
@@ -236,18 +572,18 @@ export default function PortfolioPage() {
                 />
                 <StatCard
                     label="Holdings Value"
-                    value={INR(holdingsValue, 0)}
+                    value={INR(displayHoldingsValue, 0)}
                     sub={`${portfolioHoldings.length} position${portfolioHoldings.length !== 1 ? "s" : ""}`}
                     icon={BarChart3}
                     accentClass="bg-accent/10 text-accent"
                 />
                 <StatCard
                     label="Unrealized P&L"
-                    value={`${unrealPnlPositive ? "+" : ""}${INR(unrealizedPnl, 0)}`}
-                    sub="Open positions"
-                    positive={unrealizedPnl === 0 ? undefined : unrealPnlPositive}
+                    value={`${unrealPnlPositive ? "+" : ""}${INR(displayUnrealizedPnl, 0)}`}
+                    sub={hasLivePrices ? "Live · open positions" : "Open positions"}
+                    positive={displayUnrealizedPnl === 0 ? undefined : unrealPnlPositive}
                     icon={unrealPnlPositive ? TrendingUp : TrendingDown}
-                    accentClass={unrealizedPnl === 0 ? "bg-muted text-muted-foreground" : unrealPnlPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
+                    accentClass={displayUnrealizedPnl === 0 ? "bg-muted text-muted-foreground" : unrealPnlPositive ? "bg-[hsl(var(--up)/0.12)] text-up" : "bg-[hsl(var(--down)/0.12)] text-down"}
                 />
                 <StatCard
                     label="Realized P&L"
@@ -327,6 +663,47 @@ export default function PortfolioPage() {
                 </div>
             </div>
 
+            {/* Achievements */}
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Award className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-semibold">Achievements</span>
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground">
+                        {unlockedCount} / {ACHIEVEMENTS.length} unlocked
+                    </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 divide-x divide-y divide-border/40">
+                    {ACHIEVEMENTS.map((a) => (
+                        <div
+                            key={a.id}
+                            className={cn(
+                                "p-4 flex flex-col gap-2 transition-colors",
+                                a.unlocked ? "bg-card" : "bg-muted/20 opacity-50",
+                            )}
+                        >
+                            <div className="flex items-center gap-2">
+                                <span className={cn("text-xl", !a.unlocked && "grayscale")}>{a.icon}</span>
+                                {a.unlocked && (
+                                    <span className="text-[9px] font-bold text-up bg-[hsl(var(--up)/0.12)] px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                                        Unlocked
+                                    </span>
+                                )}
+                            </div>
+                            <div>
+                                <p className={cn("text-xs font-bold", a.unlocked ? "text-foreground" : "text-muted-foreground")}>
+                                    {a.title}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground/70 leading-relaxed mt-0.5">
+                                    {a.description}
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
             {/* Positions table — Open / Closed tabs */}
             <div className="bg-card border border-border rounded-xl overflow-hidden">
                 {/* Tab bar */}
@@ -335,6 +712,7 @@ export default function PortfolioPage() {
                         { id: "open",      label: "Open Positions",   count: portfolioHoldings.length },
                         { id: "closed",    label: "Closed Positions", count: Object.keys(closedPositions).length },
                         { id: "analytics", label: "Analytics",        count: sellTrades.length },
+                        { id: "journal",   label: "Journal",          count: trades.length },
                     ] as const).map((tab) => (
                         <button
                             key={tab.id}
@@ -366,15 +744,22 @@ export default function PortfolioPage() {
                                     <th className="text-left px-5 py-3 font-semibold">Symbol</th>
                                     <th className="text-right px-5 py-3 font-semibold">Qty</th>
                                     <th className="text-right px-5 py-3 font-semibold">Avg Cost</th>
-                                    <th className="text-right px-5 py-3 font-semibold">LTP</th>
+                                    <th className="text-right px-5 py-3 font-semibold">
+                                        LTP
+                                        {hasLivePrices && (
+                                            <span className="ml-1.5 text-[9px] font-bold text-up bg-[hsl(var(--up)/0.12)] px-1 py-0.5 rounded uppercase tracking-wider">Live</span>
+                                        )}
+                                    </th>
                                     <th className="text-right px-5 py-3 font-semibold">Market Value</th>
                                     <th className="text-right px-5 py-3 font-semibold">Unrealized P&L</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {portfolioHoldings.length > 0 ? portfolioHoldings.map((h) => {
-                                    const pnl = (h.currentPrice - h.avgPrice) * h.qty;
-                                    const pnlPct = h.avgPrice > 0 ? ((h.currentPrice - h.avgPrice) / h.avgPrice) * 100 : 0;
+                                    const cp = livePrice[h.symbol] ?? h.currentPrice;
+                                    const isRowLive = livePrice[h.symbol] !== undefined;
+                                    const pnl = (cp - h.avgPrice) * h.qty;
+                                    const pnlPct = h.avgPrice > 0 ? ((cp - h.avgPrice) / h.avgPrice) * 100 : 0;
                                     const pos = pnl >= 0;
                                     return (
                                         <tr key={h.symbol} className="border-b border-border/30 last:border-0 hover:bg-muted/20 transition-colors">
@@ -391,8 +776,13 @@ export default function PortfolioPage() {
                                             </td>
                                             <td className="px-5 py-4 text-right font-mono text-sm">{h.qty}</td>
                                             <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.avgPrice)}</td>
-                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.currentPrice)}</td>
-                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(h.marketValue ?? h.currentPrice * h.qty, 0)}</td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">
+                                                {INR(cp)}
+                                                {isRowLive && (
+                                                    <span className="ml-1 w-1 h-1 rounded-full bg-up inline-block align-middle" />
+                                                )}
+                                            </td>
+                                            <td className="px-5 py-4 text-right font-mono text-sm">{INR(cp * h.qty, 0)}</td>
                                             <td className="px-5 py-4 text-right">
                                                 <p className={cn("font-mono text-sm font-semibold", pos ? "text-up" : "text-down")}>
                                                     {pos ? "+" : ""}{INR(pnl, 0)}
@@ -607,10 +997,215 @@ export default function PortfolioPage() {
                                         </div>
                                     ))}
                                 </div>
+
+                                {/* Streak + Top symbols */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {/* Streak */}
+                                    <div className={cn(
+                                        "rounded-xl border p-4 flex items-center justify-between",
+                                        tradingStreak.type === "win"
+                                            ? "bg-[hsl(var(--up)/0.05)] border-[hsl(var(--up)/0.2)]"
+                                            : tradingStreak.type === "loss"
+                                                ? "bg-[hsl(var(--down)/0.05)] border-[hsl(var(--down)/0.2)]"
+                                                : "bg-background border-border",
+                                    )}>
+                                        <div>
+                                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Current Streak</p>
+                                            <p className={cn("text-2xl font-mono font-bold",
+                                                tradingStreak.type === "win" ? "text-up" : tradingStreak.type === "loss" ? "text-down" : "text-foreground",
+                                            )}>
+                                                {tradingStreak.count}×
+                                            </p>
+                                            <p className="text-[10px] text-muted-foreground mt-1 capitalize">
+                                                {tradingStreak.type === "none" ? "no trades" : `consecutive ${tradingStreak.type}s`}
+                                            </p>
+                                        </div>
+                                        <div className={cn("text-4xl",
+                                            tradingStreak.type === "win" ? "" : tradingStreak.type === "loss" ? "" : ""
+                                        )}>
+                                            {tradingStreak.type === "win" ? "🔥" : tradingStreak.type === "loss" ? "❄️" : "—"}
+                                        </div>
+                                    </div>
+
+                                    {/* Top symbols */}
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Most Traded</p>
+                                        <div className="space-y-1.5">
+                                            {topSymbols.length === 0 ? (
+                                                <p className="text-xs text-muted-foreground/50 italic">No trades yet</p>
+                                            ) : topSymbols.map((s) => (
+                                                <div key={s.symbol} className="flex items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="text-xs font-semibold font-mono text-foreground w-20 truncate">{s.symbol}</span>
+                                                        <span className="text-[10px] text-muted-foreground">{s.count} trades</span>
+                                                    </div>
+                                                    <span className={cn("text-[11px] font-mono font-bold shrink-0", s.pnl >= 0 ? "text-up" : "text-down")}>
+                                                        {s.pnl >= 0 ? "+" : ""}{INR(s.pnl, 0)}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* P&L by Day of Week */}
+                                <div className="bg-background border border-border rounded-xl p-4">
+                                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-4">P&amp;L by Day of Week</p>
+                                    <ResponsiveContainer width="100%" height={130}>
+                                        <BarChart data={pnlByDay} barSize={28}>
+                                            <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                                            <YAxis hide />
+                                            <Tooltip
+                                                cursor={{ fill: "hsl(var(--muted)/0.3)" }}
+                                                content={({ active, payload }) => {
+                                                    if (!active || !payload?.length) return null;
+                                                    const d = payload[0].payload;
+                                                    return (
+                                                        <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
+                                                            <p className="text-muted-foreground mb-0.5">{d.day} · {d.count} trades</p>
+                                                            <p className={cn("font-mono font-semibold", d.pnl >= 0 ? "text-up" : "text-down")}>
+                                                                {d.pnl >= 0 ? "+" : ""}{INR(d.pnl, 0)}
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                }}
+                                            />
+                                            <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                                                {pnlByDay.map((entry, i) => (
+                                                    <Cell
+                                                        key={i}
+                                                        fill={entry.pnl >= 0 ? "hsl(var(--up))" : "hsl(var(--down))"}
+                                                        fillOpacity={entry.count > 0 ? 0.85 : 0.2}
+                                                    />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+
+                                {/* Monthly P&L */}
+                                {pnlByMonth.length > 0 && (
+                                    <div className="bg-background border border-border rounded-xl p-4">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-4">Monthly P&amp;L</p>
+                                        <ResponsiveContainer width="100%" height={120}>
+                                            <BarChart data={pnlByMonth} barSize={32}>
+                                                <XAxis dataKey="month" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                                                <YAxis hide />
+                                                <Tooltip
+                                                    cursor={{ fill: "hsl(var(--muted)/0.3)" }}
+                                                    content={({ active, payload }) => {
+                                                        if (!active || !payload?.length) return null;
+                                                        const d = payload[0].payload;
+                                                        return (
+                                                            <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
+                                                                <p className="text-muted-foreground mb-0.5">{d.month}</p>
+                                                                <p className={cn("font-mono font-semibold", d.pnl >= 0 ? "text-up" : "text-down")}>
+                                                                    {d.pnl >= 0 ? "+" : ""}{INR(d.pnl, 0)}
+                                                                </p>
+                                                            </div>
+                                                        );
+                                                    }}
+                                                />
+                                                <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                                                    {pnlByMonth.map((entry, i) => (
+                                                        <Cell
+                                                            key={i}
+                                                            fill={entry.pnl >= 0 ? "hsl(var(--up))" : "hsl(var(--down))"}
+                                                            fillOpacity={0.85}
+                                                        />
+                                                    ))}
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
                 )}
+
+                {/* Journal panel */}
+                {posTab === "journal" && (() => {
+                    const SIDE_FILTERS = [
+                        { id: "all",  label: "All Trades" },
+                        { id: "buy",  label: "Buys" },
+                        { id: "sell", label: "Sells" },
+                    ] as const;
+
+                    const allTags = Array.from(new Set(trades.flatMap((t) => t.order?.tags ?? [])));
+
+                    const filtered = trades.filter((t) => {
+                        if (journalFilter === "all") return true;
+                        if (journalFilter === "buy" || journalFilter === "sell") return t.side === journalFilter;
+                        return t.order?.tags?.includes(journalFilter);
+                    });
+
+                    return (
+                        <div>
+                            {/* Filter bar */}
+                            <div className="flex items-center gap-2 px-5 py-3 border-b border-border overflow-x-auto">
+                                {SIDE_FILTERS.map((f) => (
+                                    <button
+                                        key={f.id}
+                                        onClick={() => setJournalFilter(f.id)}
+                                        className={cn(
+                                            "px-3 py-1 text-xs font-semibold rounded-full border whitespace-nowrap transition-all",
+                                            journalFilter === f.id
+                                                ? "bg-primary/15 border-primary/40 text-primary"
+                                                : "bg-muted border-border text-muted-foreground hover:text-foreground",
+                                        )}
+                                    >
+                                        {f.label}
+                                    </button>
+                                ))}
+                                {allTags.length > 0 && (
+                                    <>
+                                        <div className="h-4 w-px bg-border mx-1 shrink-0" />
+                                        {allTags.map((tag) => (
+                                            <button
+                                                key={tag}
+                                                onClick={() => setJournalFilter(journalFilter === tag ? "all" : tag)}
+                                                className={cn(
+                                                    "px-2.5 py-0.5 text-[10px] font-semibold rounded-full border whitespace-nowrap transition-all",
+                                                    journalFilter === tag
+                                                        ? cn(TAG_COLOR[tag] ?? "bg-primary/15 border-primary/40 text-primary")
+                                                        : "bg-muted border-border text-muted-foreground hover:text-foreground",
+                                                )}
+                                            >
+                                                <Tag className="w-2.5 h-2.5 inline mr-1" />{tag}
+                                            </button>
+                                        ))}
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Trade rows */}
+                            {filtered.length > 0 ? (
+                                <div>
+                                    {filtered.map((trade) => (
+                                        <JournalRow
+                                            key={trade.id}
+                                            trade={trade}
+                                            onSaved={() => queryClient.invalidateQueries({ queryKey: ["trades"] })}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="py-16 text-center">
+                                    <BookOpen className="w-8 h-8 mx-auto mb-3 text-muted-foreground/20" />
+                                    <p className="text-sm text-muted-foreground mb-1">
+                                        {trades.length === 0 ? "No trades yet" : "No trades match this filter"}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground/60">
+                                        {trades.length === 0
+                                            ? "After your first fill, journal entries appear here"
+                                            : "Try a different filter above"}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
             </div>
 
             {/* Reset confirmation modal */}

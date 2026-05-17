@@ -5,6 +5,7 @@ import api from "@/lib/axios";
 
 export interface Trade {
     id: string;
+    orderId: string;
     symbol: string;
     side: "buy" | "sell";
     quantity: number;
@@ -12,6 +13,7 @@ export interface Trade {
     avgCostBasis: number;
     realizedPnl: number;
     filledAt: string;
+    order?: { note: string | null; tags: string[] };
 }
 
 export interface TradesResponse {

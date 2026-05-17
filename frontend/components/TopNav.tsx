@@ -1,5 +1,5 @@
 "use client";
-import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut, Keyboard, Trophy, Settings } from "lucide-react";
+import { BarChart3, Bell, Briefcase, Menu, TrendingUp, X, Activity, LogOut, Keyboard, Trophy, Settings, Star } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -12,6 +12,7 @@ const navItems = [
   { label: "Markets", path: "/", icon: BarChart3 },
   { label: "Trade", path: "/trade", icon: TrendingUp },
   { label: "Portfolio", path: "/portfolio", icon: Briefcase },
+  { label: "Watchlist", path: "/watchlist", icon: Star },
   { label: "Activity", path: "/activity", icon: Activity },
   { label: "Leaderboard", path: "/leaderboard", icon: Trophy },
 ];
@@ -60,7 +61,7 @@ export function TopNav() {
           <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
             <TrendingUp className="w-4 h-4 text-primary-foreground" />
           </div>
-          <span className="font-bold text-sm text-foreground hidden sm:inline tracking-tight">
+          <span className="font-bold text-sm text-foreground hidden sm:inline" style={{ fontFamily: "var(--font-space-grotesk)", letterSpacing: "-0.03em" }}>
             NexTrade
           </span>
         </Link>

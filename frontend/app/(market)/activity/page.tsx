@@ -10,6 +10,7 @@ import {
     AlertTriangle,
     Activity,
     Inbox,
+    Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +21,7 @@ const EVENT_LABELS: Record<ActivityEventType, string> = {
     order_filled: "Order Filled",
     order_cancelled: "Order Cancelled",
     order_rejected: "Order Rejected",
+    price_alert: "Price Alert",
 };
 
 const EVENT_ICONS: Record<ActivityEventType, React.ElementType> = {
@@ -27,6 +29,7 @@ const EVENT_ICONS: Record<ActivityEventType, React.ElementType> = {
     order_filled: CheckCircle2,
     order_cancelled: XCircle,
     order_rejected: AlertTriangle,
+    price_alert: Bell,
 };
 
 const EVENT_COLORS: Record<ActivityEventType, string> = {
@@ -34,6 +37,7 @@ const EVENT_COLORS: Record<ActivityEventType, string> = {
     order_filled: "text-up",
     order_cancelled: "text-down",
     order_rejected: "text-destructive",
+    price_alert: "text-primary",
 };
 
 const ICON_BG: Record<ActivityEventType, string> = {
@@ -41,6 +45,7 @@ const ICON_BG: Record<ActivityEventType, string> = {
     order_filled: "bg-[hsl(var(--up)/0.12)]",
     order_cancelled: "bg-[hsl(var(--down)/0.12)]",
     order_rejected: "bg-destructive/10",
+    price_alert: "bg-primary/10",
 };
 
 function formatRelative(iso: string): string {
@@ -61,6 +66,7 @@ function eventDescription(ev: ActivityEvent): string {
     if (ev.type === "order_filled") return `${action} ${ev.qty} × ${ev.symbol} — filled${priceStr}`;
     if (ev.type === "order_cancelled") return `${ev.qty} × ${ev.symbol} — order cancelled`;
     if (ev.type === "order_rejected") return `${ev.qty} × ${ev.symbol} — rejected`;
+    if (ev.type === "price_alert") return `${ev.symbol.replace(".NS", "")} hit target ${ev.meta ?? ""}`;
     return ev.symbol;
 }
 
@@ -169,14 +175,16 @@ export default function ActivityPage() {
                                         <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
                                             {ev.symbol}
                                         </span>
-                                        <span className={cn(
-                                            "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
-                                            ev.side === "buy"
-                                                ? "bg-[hsl(var(--up)/0.12)] text-up"
-                                                : "bg-[hsl(var(--down)/0.12)] text-down",
-                                        )}>
-                                            {ev.side}
-                                        </span>
+                                        {ev.side !== "alert" && (
+                                            <span className={cn(
+                                                "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
+                                                ev.side === "buy"
+                                                    ? "bg-[hsl(var(--up)/0.12)] text-up"
+                                                    : "bg-[hsl(var(--down)/0.12)] text-down",
+                                            )}>
+                                                {ev.side}
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="text-sm text-foreground">{eventDescription(ev)}</p>
                                 </div>

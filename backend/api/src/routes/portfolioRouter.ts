@@ -146,6 +146,9 @@ router.get('/trades', async (req: AuthRequest, res: Response) => {
                 where: { userId },
                 orderBy: { filledAt: 'desc' },
                 take: 200,
+                include: {
+                    order: { select: { note: true, tags: true } },
+                },
             }),
             prisma.trade.aggregate({
                 where: { userId, side: 'sell' },
